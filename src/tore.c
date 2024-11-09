@@ -364,7 +364,7 @@ Period_Modifier tore_period_modifiers[COUNT_PERIODS] = {
 
 Period period_by_tore_modifier(const char *modifier)
 {
-    for (Period period = PERIOD_NONE; period < COUNT_PERIODS; ++period) {
+    for (Period period = PERIOD_DAY; period < COUNT_PERIODS; ++period) {
         if (strcmp(modifier, tore_period_modifiers[period].modifier) == 0) {
             return period;
         }
@@ -645,7 +645,7 @@ int main(int argc, char **argv)
 
         err = listen(server_fd, 69);
         if (err != 0) {
-            fprintf(stderr, "ERRO: Could not listen to socket, it's too quiet: %s\n", strerror(errno));
+            fprintf(stderr, "ERROR: Could not listen to socket, it's too quiet: %s\n", strerror(errno));
             return_defer(1);
         }
 
