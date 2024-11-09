@@ -8,8 +8,10 @@
 #define NOB_STRIP_PREFIX
 #include "nob.h"
 
-void compile_c_code(String_View s, int line, char *filename) {
+void compile_c_code(String_View s, int line, char *filename, int offset) {
     printf("#line %d \"%s\"\n", line, filename);
+    // TODO: This seems hacky to say the least
+    printf("%*s", offset, "");
     printf("%.*s\n", (int) s.count, s.data);
 }
 
@@ -30,6 +32,16 @@ int lines_in_token(String_View s) {
     return lines;
 }
 
+int chars_in_token_last_line(String_View s) {
+    int offset = 0;
+    for (uint64_t i = 0; i < s.count; ++i) {
+        offset += 1;
+        if (s.data[i] == '\n')
+            offset = 0;
+    }
+    return offset;
+}
+
 int main(int argc, char *argv[])
 {
     if (argc < 2) {
@@ -42,17 +54,19 @@ int main(int argc, char *argv[])
     String_View temp = sb_to_sv(sb);
     int c_code_mode = 0;
     int line = 1;
+    int offset = 0;
     // TODO: Generate line control preprocessor directives
     // - GCC: https://gcc.gnu.org/onlinedocs/cpp/Line-Control.html
     // - MSVC: https://learn.microsoft.com/en-us/cpp/preprocessor/hash-line-directive-c-cpp
     while (temp.count) {
         String_View token = sv_chop_by_delim(&temp, '%');
         if (c_code_mode) {
-            compile_c_code(token, line, filepath);
+            compile_c_code(token, line, filepath, offset);
         } else {
             compile_byte_array(token);
         }
         line += lines_in_token(token);
+        offset = chars_in_token_last_line(token);
         c_code_mode = !c_code_mode;
     }
 
