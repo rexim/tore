@@ -557,6 +557,36 @@ void render_index_page(String_Builder *sb, Collapsed_Notifications notifs, Remin
 #undef ESCAPED_OUT
 }
 
+void print_prog_info() {
+    printf("Tore (Total REcall)\nhttps://github.com/rexim/tore\n");
+    printf("Version: "GIT_HASH"\n");
+}
+
+void print_usages(const char *program_name) {
+    printf("Usage: %s [command] [options]\n\n", program_name);
+    printf("help         Display this help message\n");
+    printf("\u21AA Usage: %s help\n", program_name);
+    printf("version      Display the latest git hash\n");
+    printf("\u21AA Usage: %s version\n", program_name);
+    printf("serve        Serve a webpage displaying notifications/reminders at http://<addr>:<port> (Default: http://127.0.0.1:6969)\n");
+    printf("\u21AA Usage: %s serve [--addr=<address> | --addr <address>] [--port=<port> | --port <port>]\n", program_name);
+
+    printf("\nNotifications:\n");
+    printf("notify       Create a notification\n");
+    printf("\u21AA Usage: %s notify <title...>\n", program_name);
+    printf("dismiss      Dismiss an active notification by index\n");
+    printf("\u21AA Usage: %s dismiss <index>\n", program_name);
+
+    printf("\nReminders:\n");
+    printf("remind       Create a reminder\n");
+    printf("\u21AA Usage: %s remind [<title> <scheduled_at> [period]]\n", program_name);
+    printf("checkout     Consume then display active reminders\n");
+    printf("\u21AA Usage: %s checkout\n", program_name);
+    printf("forget       Forget (delete) a reminder by index\n");
+    printf("\u21AA Usage: %s forget <index>\n", program_name);
+}
+
+
 int main(int argc, char **argv)
 {
     int result = 0;
@@ -570,7 +600,11 @@ int main(int argc, char **argv)
     const char *command_name= "checkout";
     if (argc > 0) command_name = shift(argv, argc);
 
-    // TODO: implement `help` command
+    if (strcmp(command_name, "help") == 0) {
+        print_prog_info();
+        print_usages(program_name);
+        return 0;
+    }
 
     if (strcmp(command_name, "version") == 0) {
         fprintf(stderr, "GIT HASH: "GIT_HASH"\n");
@@ -619,8 +653,29 @@ int main(int argc, char **argv)
     }
 
     if (strcmp(command_name, "serve") == 0) {
+        const char *usage = "Usage: %s serve [--addr=<address> | --addr <address>] [--port=<port> | --port <port>]\n";
         const char *addr = "127.0.0.1";
         uint16_t port = 6969;
+
+        while (argc > 0) {
+            const char *arg = shift(argv, argc);
+            char *value = strchr(arg, '=');
+            if (value) *(value++) = '\0';
+            else if (argc > 0) value = shift(argv, argc);
+            else {
+                fprintf(stderr, usage, program_name);
+                fprintf(stderr, "ERROR: invalid argument format\n");
+                return_defer(1);
+            }
+
+            if (strcmp(arg, "--addr") == 0) addr = value;
+            else if (strcmp(arg, "--port") == 0) port = (uint16_t)atoi(value);
+            else {
+                fprintf(stderr, usage, program_name);
+                fprintf(stderr, "ERROR: unexpected argument provided\n");
+                return_defer(1);
+            }
+        }
 
         int server_fd = socket(AF_INET, SOCK_STREAM, 0);
         if (server_fd < 0) {
@@ -723,8 +778,8 @@ int main(int argc, char **argv)
 
     if (strcmp(command_name, "forget") == 0) {
         if (argc <= 0) {
-            fprintf(stderr, "Usage: %s forget <number>\n", program_name);
-            fprintf(stderr, "ERROR: expected number\n");
+            fprintf(stderr, "Usage: %s forget <index>\n", program_name);
+            fprintf(stderr, "ERROR: expected index\n");
             return_defer(1);
         }
         int number = atoi(shift(argv, argc));
@@ -789,6 +844,7 @@ int main(int argc, char **argv)
     // TODO: some way to turn Notification into a Reminder
 
     fprintf(stderr, "ERROR: unknown command %s\n", command_name);
+    print_usages(program_name);
     return_defer(1);
 
 defer:
