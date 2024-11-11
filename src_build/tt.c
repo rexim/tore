@@ -23,18 +23,30 @@ void compile_byte_array(String_View s, int newline) {
 int main(int argc, char *argv[])
 {
     if (argc < 2) {
-        fprintf(stderr, "Usage: ./tt <template.h.tt>\n");
+        fprintf(stderr, "Usage: ./tt [--format] <template.h.tt>\n");
         return 1;
     }
-    const char *filepath = argv[1];
+    int want_format = 0; // This can be changed if the rendering function uses
+                         // formatting and would need double % to work
+    if (argc == 2) {
+        if (strcmp("--format", argv[1]) == 0) {
+            fprintf(stderr, "Missing file argument\n");
+            fprintf(stderr, "Usage: ./tt [--format] <template.h.tt>\n");
+            return 1;
+        }
+    } else {
+        if (strcmp("--format", argv[1]) == 0) {
+            want_format = 1;
+        }
+    }
+
+    const char *filepath = (want_format ? argv[2] : argv[1]);
     String_Builder sb = {0};
     if (!nob_read_entire_file(filepath, &sb)) return 1;
     String_View temp = sb_to_sv(sb);
     int c_code_mode = 0;
     int escaped_match = 0;
     int do_newline = 0;
-    int want_format = 0; // This can be changed if the rendering function uses
-                         // formatting and would need double % to work
     // TODO: Generate line control preprocessor directives
     // - GCC: https://gcc.gnu.org/onlinedocs/cpp/Line-Control.html
     // - MSVC: https://learn.microsoft.com/en-us/cpp/preprocessor/hash-line-directive-c-cpp
