@@ -33,6 +33,8 @@ int main(int argc, char *argv[])
     int c_code_mode = 0;
     int escaped_match = 0;
     int do_newline = 0;
+    int want_format = 0; // This can be changed if the rendering function uses
+                         // formatting and would need double % to work
     // TODO: Generate line control preprocessor directives
     // - GCC: https://gcc.gnu.org/onlinedocs/cpp/Line-Control.html
     // - MSVC: https://learn.microsoft.com/en-us/cpp/preprocessor/hash-line-directive-c-cpp
@@ -54,7 +56,7 @@ int main(int argc, char *argv[])
         } else { // We make sure to properly print the token
             String_Builder sb = {0};
             sb_append_buf(&sb, token.data, token.count-1);
-            if (c_code_mode) {
+            if (c_code_mode || !want_format) {
                 sb_append_cstr(&sb, "%");
             } else {
                 sb_append_cstr(&sb, "%%");
