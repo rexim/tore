@@ -259,7 +259,7 @@ bool dismiss_grouped_notification_by_index(sqlite3 *db, int index, int *dismisse
         return_defer(false);
     }
     if (!dismiss_grouped_notification_by_group_id(db, notifs.items[index].group_id)) return_defer(false);
-    if (dismissed_count) *dismissed_count = notifs.items[index].group_count;
+    if (dismissed_count) *dismissed_count += notifs.items[index].group_count;
 
 defer:
     free(notifs.items);
@@ -600,18 +600,41 @@ int main(int argc, char **argv)
         return_defer(0);
     }
 
-    // TODO: `dismiss` should accept several indices
     if (strcmp(command_name, "dismiss") == 0) {
         if (argc <= 0) {
             fprintf(stderr, "Usage: %s dismiss <index>\n", program_name);
             fprintf(stderr, "ERROR: expected index\n");
             return_defer(1);
         }
-
-        int index = atoi(shift(argv, argc));
+        
         int dismissed_count = 0;
-        if (!dismiss_grouped_notification_by_index(db, index, &dismissed_count)) return_defer(1);
+
+        // Collect all the indices to dismiss
+        int indices_count = argc;
+        int *indices = malloc(sizeof(int) * indices_count);
+        int *index = indices;
+        while (argc > 0) {
+            *(index++) = atoi(shift(argv, argc));
+        }
+
+        // Dismiss from highest to lowest index
+        for (int i = 0; i < indices_count; ++i) {
+            int max = indices[0];
+            for (int j = 0; j < indices_count; ++j) {
+                if (indices[j] >= indices[max]) {
+                    max = j;
+                }
+            }
+
+            if (!dismiss_grouped_notification_by_index(db, indices[max], &dismissed_count)) return_defer(1);
+
+            indices[max] = -1;
+        }
+
+        free(indices);
+
         if (!show_active_notifications(db)) return_defer(1);
+
         printf("Dismissed %d notifications\n", dismissed_count);
         return_defer(0);
     }
