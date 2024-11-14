@@ -619,7 +619,7 @@ int main(int argc, char **argv)
 
         // Dismiss from highest to lowest index
         for (int i = 0; i < indices_count; ++i) {
-            int max = indices[0];
+            int max = 0;
             for (int j = 0; j < indices_count; ++j) {
                 if (indices[j] >= indices[max]) {
                     max = j;
