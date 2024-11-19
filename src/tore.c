@@ -648,7 +648,23 @@ int main(int argc, char **argv)
     const char *command_name= "checkout";
     if (argc > 0) command_name = shift(argv, argc);
 
-    // TODO: implement `help` command
+    if (strcmp(command_name, "help") == 0) {
+        printf("Manage/display reminders and notifications on the terminal.\n");
+        printf("Usage %s <command> <arguments...>\n", program_name);
+        printf("commands:\n");
+        printf("  checkout                                 -- Display active notifications.\n");
+        printf("  expand <index>                           -- Displays currently active notification with the selected index.\n");
+        printf("  notify <title...>                        -- Immediately add a notification.\n");
+        printf("  dismiss <index>                          -- Dismiss the notification with the selected index.\n");
+        printf("  remind [<title> <scheduled_at> [period]] -- Schedule a reminder for a given date with a given periodicity,\n");
+        printf("                                              without arguments, displays the active notifications.\n");
+        printf("  forget <index>                           -- Remove the reminder with the selected index.\n");
+        printf("  serve                                    -- Start a webserver on localhost:6969 displaying active\n");
+        printf("                                              notifications and reminders.\n");
+        printf("  version                                  -- Show the current version (git hash) and exit.\n");
+        printf("  help                                     -- Show this help message and exit.\n");
+        return 0;
+    }
 
     if (strcmp(command_name, "version") == 0) {
         fprintf(stderr, "GIT HASH: "GIT_HASH"\n");
@@ -724,7 +740,7 @@ int main(int argc, char **argv)
 
         err = listen(server_fd, 69);
         if (err != 0) {
-            fprintf(stderr, "ERRO: Could not listen to socket, it's too quiet: %s\n", strerror(errno));
+            fprintf(stderr, "ERROR: Could not listen to socket, it's too quiet: %s\n", strerror(errno));
             return_defer(1);
         }
 

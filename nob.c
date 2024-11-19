@@ -77,12 +77,12 @@ char *get_git_hash(Cmd *cmd)
     String_Builder sb = {0};
     Fd fdout = fd_open_for_write(GIT_HASH_FILE);
     if (fdout == INVALID_FD) return_defer(NULL);
-    cmd_append(cmd, "git", "rev-parse", "HEAD");
+    cmd_append(cmd, "git", "show", "--no-patch", "--pretty=%H (committed on: %aD)", "HEAD");
     if (!cmd_run_sync_redirect_and_reset(cmd, (Nob_Cmd_Redirect) {
         .fdout = &fdout
     })) return_defer(NULL);
     if (!read_entire_file(GIT_HASH_FILE, &sb)) return_defer(NULL);
-    while (sb.count > 0 && isspace(sb.items[--sb.count]));
+    while (sb.count > 0) { if (!isspace(sb.items[sb.count-1])) break; sb.count -= 1; }
     sb_append_null(&sb);
     return_defer(sb.items);
 defer:
