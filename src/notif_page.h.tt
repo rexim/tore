@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Tore - Notification - %INT(notif.id);%</title>
+  </head>
+  <body>
+    <h1>Tore - Notification - %INT(notif.id);%</h1>
+    <h2>%ESCAPED_OUT(notif.title, strlen(notif.title));%</h2>
+  </body>
+</html>

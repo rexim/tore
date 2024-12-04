@@ -165,6 +165,48 @@ typedef struct {
     size_t capacity;
 } Notifications;
 
+int load_notification_by_id(sqlite3 *db, int notif_id, Notification *notif)
+{
+    bool result = true;
+    sqlite3_stmt *stmt = NULL;
+
+    int ret = sqlite3_prepare_v2(db,
+        "SELECT id, title, datetime(created_at, 'localtime') as ts, reminder_id, ifnull(reminder_id, -id) as group_id "
+        "FROM Notifications WHERE id = ?;",
+        -1, &stmt, NULL);
+    if (ret != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(-1);
+    }
+
+    if (sqlite3_bind_int(stmt, 1, notif_id) != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(-1);
+    }
+
+    ret = sqlite3_step(stmt);
+    if (ret == SQLITE_DONE) {
+        // nothing found
+        return_defer(0);
+    }
+
+    if (ret != SQLITE_ROW) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(-1);
+    }
+
+    int column = 0;
+    notif->id = sqlite3_column_int(stmt, column++);
+    notif->title = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
+    notif->created_at = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
+    notif->reminder_id = sqlite3_column_int(stmt, column++);
+    notif->group_id = sqlite3_column_int(stmt, column++);
+
+defer:
+    if (stmt) sqlite3_finalize(stmt);
+    return result;
+}
+
 bool load_active_notifications_of_group(sqlite3 *db, int group_id, Notifications *ns)
 {
     bool result = true;
@@ -211,6 +253,7 @@ defer:
 }
 
 typedef struct {
+    int notif_id;
     const char *title;       // TODO: maybe in case of group_id > 0 the title should be the title of the corresponding reminder?
     const char *created_at;  // TODO: maybe in case of group_id > 0 the created_at should be the created_at of the latest notification?
     int reminder_id;
@@ -245,7 +288,7 @@ bool load_active_grouped_notifications(sqlite3 *db, Grouped_Notifications *notif
     //   Which is a working solution, but all the other problems UUIDs address remain.
 
     int ret = sqlite3_prepare_v2(db,
-        "SELECT title, datetime(created_at, 'localtime') as ts, reminder_id, ifnull(reminder_id, -id) as group_id, count(*) as group_count "
+        "SELECT id, title, datetime(created_at, 'localtime') as ts, reminder_id, ifnull(reminder_id, -id) as group_id, count(*) as group_count "
         "FROM Notifications WHERE dismissed_at IS NULL GROUP BY group_id ORDER BY ts;",
         -1, &stmt, NULL);
     if (ret != SQLITE_OK) {
@@ -255,12 +298,14 @@ bool load_active_grouped_notifications(sqlite3 *db, Grouped_Notifications *notif
 
     for (ret = sqlite3_step(stmt); ret == SQLITE_ROW; ret = sqlite3_step(stmt)) {
         int column = 0;
+        int notif_id = sqlite3_column_int(stmt, column++);
         const char *title = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
         const char *created_at = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
         int reminder_id = sqlite3_column_int(stmt, column++);
         int group_id = sqlite3_column_int(stmt, column++);
         int group_count = sqlite3_column_int(stmt, column++);
         da_append(notifs, ((Grouped_Notification) {
+            .notif_id = notif_id,
             .title = title,
             .created_at = created_at,
             .reminder_id = reminder_id,
@@ -678,6 +723,17 @@ void render_error_page(String_Builder *sb, int error_code, const char *error_nam
 #undef ERROR_NAME
 }
 
+void render_notif_page(String_Builder *sb, Notification notif)
+{
+#define OUT(buf, size) sb_append_buf(sb, buf, size)
+#define ESCAPED_OUT(buf, size) sb_append_html_escaped_buf(sb, buf, size)
+#define INT(x) sb_append_cstr(sb, temp_sprintf("%d", (x)))
+#include "notif_page.h"
+#undef INT
+#undef OUT
+#undef ESCAPED_OUT
+}
+
 sqlite3 *open_tore_db(void)
 {
     sqlite3 *result = NULL;
@@ -804,7 +860,7 @@ defer:
 }
 
 typedef struct {
-    sqlite3 *db;
+    int client_fd;
     Grouped_Notifications notifs;
     Reminders reminders;
     String_Builder request;
@@ -831,7 +887,188 @@ Resource *find_resource(const char *file_path)
     return NULL;
 }
 
-void serve_request(Serve_Context *sc, int client_fd)
+bool write_entire_sv(int fd, String_View sv)
+{
+    String_View untransfered = sv;
+    while (untransfered.count > 0) {
+        ssize_t transfered = write(fd, untransfered.data, untransfered.count);
+        if (transfered < 0) {
+            fprintf(stderr, "ERROR: Could not write response: %s\n", strerror(errno));
+            return false;
+        }
+        untransfered.data += transfered;
+        untransfered.count -= transfered;
+    }
+    return true;
+}
+
+const char *http_reason_phrase_by_status_code(int status_code)
+{
+    // Taken from https://gist.github.com/josantonius/0a889ab6f18db2fcefda15a039613293
+    static const char *reason_phrases[] = {
+        [100] = "Continue",
+        [101] = "Switching Protocols",
+        [102] = "Processing",
+        [103] = "Checkpoint",
+        [200] = "OK",
+        [201] = "Created",
+        [202] = "Accepted",
+        [203] = "Non-Authoritative Information",
+        [204] = "No Content",
+        [205] = "Reset Content",
+        [206] = "Partial Content",
+        [207] = "Multi-Status",
+        [208] = "Already Reported",
+        [300] = "Multiple Choices",
+        [301] = "Moved Permanently",
+        [302] = "Found",
+        [303] = "See Other",
+        [304] = "Not Modified",
+        [305] = "Use Proxy",
+        [306] = "Switch Proxy",
+        [307] = "Temporary Redirect",
+        [308] = "Permanent Redirect",
+        [400] = "Bad Request",
+        [401] = "Unauthorized",
+        [402] = "Payment Required",
+        [403] = "Forbidden",
+        [404] = "Not Found",
+        [405] = "Method Not Allowed",
+        [406] = "Not Acceptable",
+        [407] = "Proxy Authentication Required",
+        [408] = "Request Time-out",
+        [409] = "Conflict",
+        [410] = "Gone",
+        [411] = "Length Required",
+        [412] = "Precondition Failed",
+        [413] = "Request Entity Too Large",
+        [414] = "Request-URI Too Long",
+        [415] = "Unsupported Media Type",
+        [416] = "Requested Range Not Satisfiable",
+        [417] = "Expectation Failed",
+        [418] = "I'm a teapot",
+        [421] = "Unprocessable Entity",
+        [422] = "Misdirected Request",
+        [423] = "Locked",
+        [424] = "Failed Dependency",
+        [426] = "Upgrade Required",
+        [428] = "Precondition Required",
+        [429] = "Too Many Requests",
+        [431] = "Request Header Fileds Too Large",
+        [451] = "Unavailable For Legal Reasons",
+        [500] = "Internal Server Error",
+        [501] = "Not Implemented",
+        [502] = "Bad Gateway",
+        [503] = "Service Unavailable",
+        [504] = "Gateway Timeout",
+        [505] = "HTTP Version Not Supported",
+        [506] = "Variant Also Negotiates",
+        [507] = "Insufficient Storage",
+        [508] = "Loop Detected",
+        [509] = "Bandwidth Limit Exceeded",
+        [510] = "Not Extended",
+        [511] = "Network Authentication Required",
+    };
+
+    if (
+        !((size_t)status_code < ARRAY_LEN(reason_phrases)) ||
+        reason_phrases[status_code] == NULL
+    ) return "Unknown";
+
+    return reason_phrases[status_code];
+}
+
+void http_render_response(String_Builder *response, int status_code, const char *content_type, String_View body)
+{
+    sb_append_cstr(response, temp_sprintf("HTTP/1.0 %d %s\r\n", status_code, http_reason_phrase_by_status_code(status_code)));
+    sb_append_cstr(response, temp_sprintf("Content-Type: %s\r\n", content_type));
+    sb_append_cstr(response, temp_sprintf("Content-Length: %zu\r\n", body.count));
+    sb_append_cstr(response, "Connection: close\r\n");
+    sb_append_cstr(response, "\r\n");
+    sb_append_buf(response, body.data, body.count);
+}
+
+void serve_error(Serve_Context *sc, int status_code)
+{
+    render_error_page(&sc->body, status_code, http_reason_phrase_by_status_code(status_code));
+    http_render_response(&sc->response, status_code, "text/html", sb_to_sv(sc->body));
+    UNUSED(write_entire_sv(sc->client_fd, sb_to_sv(sc->response)));
+}
+
+bool serve_root(Serve_Context *sc)
+{
+    bool result = true;
+    sqlite3 *db = open_tore_db();
+    if (!db) return_defer(false);
+    if (!txn_begin(db)) return_defer(false);
+
+    if (!load_active_grouped_notifications(db, &sc->notifs)) {
+        serve_error(sc, 500);
+        return_defer(false);
+    }
+
+    if (!load_active_reminders(db, &sc->reminders)) {
+        serve_error(sc, 500);
+        return_defer(false);
+    }
+
+    render_index_page(&sc->body, sc->notifs, sc->reminders);
+    http_render_response(&sc->response, 200, "text/html", sb_to_sv(sc->body));
+    UNUSED(write_entire_sv(sc->client_fd, sb_to_sv(sc->response)));
+
+defer:
+    if (db) {
+        if (result) result = txn_commit(db);
+        sqlite3_close(db);
+    }
+    return result;
+}
+
+bool serve_notif(Serve_Context *sc, int notif_id)
+{
+    bool result = true;
+    sqlite3 *db = open_tore_db();
+    if (!db) return_defer(false);
+    if (!txn_begin(db)) return_defer(false);
+
+    Notification notif = {0};
+    int ret = load_notification_by_id(db, notif_id, &notif);
+    if (ret < 0) {
+        // something failed during request
+        serve_error(sc, 500);
+        return_defer(false);
+    }
+    if (ret == 0) {
+        // notification was not found
+        serve_error(sc, 404);
+        return_defer(false);
+    }
+
+    render_notif_page(&sc->body, notif);
+    http_render_response(&sc->response, 200, "text/html", sb_to_sv(sc->body));
+    UNUSED(write_entire_sv(sc->client_fd, sb_to_sv(sc->response)));
+defer:
+    if (db) {
+        if (result) result = txn_commit(db);
+        sqlite3_close(db);
+    }
+    return result;
+}
+
+void serve_resource(Serve_Context *sc, const char *resource_path, const char *content_type)
+{
+    Resource *favicon = find_resource(resource_path);
+    if (!favicon) {
+        serve_error(sc, 404);
+        return;
+    }
+
+    sb_append_buf(&sc->body, &bundle[favicon->offset], favicon->size);
+    http_render_response(&sc->response, 200, content_type, sb_to_sv(sc->body));
+    UNUSED(write_entire_sv(sc->client_fd, sb_to_sv(sc->response)));
+}
+
+void serve_request(Serve_Context *sc)
 {
     // TODO: log queries
 
@@ -842,7 +1079,7 @@ void serve_request(Serve_Context *sc, int client_fd)
     bool finish = false;
     ssize_t n = 0;
     do {
-        n = read(client_fd, buffer, sizeof(buffer));
+        n = read(sc->client_fd, buffer, sizeof(buffer));
         if (n <= 0) break;
         sb_append_buf(&sc->request, buffer, n);
         for (; cur < sc->request.count && !finish; cur += 1) {
@@ -855,6 +1092,10 @@ void serve_request(Serve_Context *sc, int client_fd)
         return;
     }
 
+    // NULL terminating the request buffer, just in case we need to use some stupid libc functions
+    // that only work with NULL-terminated strings.
+    sb_append_null(&sc->request);
+
     String_View request = sb_to_sv(sc->request);
     String_View status_line = sv_trim(sv_chop_by_delim(&request, '\n'));
     String_View method = sv_trim(sv_chop_by_delim(&status_line, ' '));
@@ -862,65 +1103,33 @@ void serve_request(Serve_Context *sc, int client_fd)
     String_View uri =  sv_trim(sv_chop_by_delim(&status_line, ' '));
 
     if (sv_eq(uri, sv_from_cstr("/"))) {
-        if (!load_active_grouped_notifications(sc->db, &sc->notifs)) return;
-        if (!load_active_reminders(sc->db, &sc->reminders)) return;
-        render_index_page(&sc->body, sc->notifs, sc->reminders);
-
-        sb_append_cstr(&sc->response, "HTTP/1.0 200\r\n");
-        sb_append_cstr(&sc->response, "Content-Type: text/html\r\n");
-        sb_append_cstr(&sc->response, temp_sprintf("Content-Length: %zu\r\n", sc->body.count));
-        sb_append_cstr(&sc->response, "Connection: close\r\n");
-        sb_append_cstr(&sc->response, "\r\n");
-        sb_append_buf(&sc->response, sc->body.items, sc->body.count);
+        UNUSED(serve_root(sc));
     } else if (sv_eq(uri, sv_from_cstr("/favicon.ico"))) {
-        Resource *favicon = find_resource("./resources/images/tore.png");
-        if (favicon) {
-            sb_append_buf(&sc->body, &bundle[favicon->offset], favicon->size);
-            sb_append_cstr(&sc->response, "HTTP/1.0 200 OK\r\n");
-            sb_append_cstr(&sc->response, "Content-Type: image/png\r\n");
-            sb_append_cstr(&sc->response, temp_sprintf("Content-Length: %zu\r\n", sc->body.count));
-            sb_append_cstr(&sc->response, "Connection: close\r\n");
-            sb_append_cstr(&sc->response, "\r\n");
-            sb_append_buf(&sc->response, sc->body.items, sc->body.count);
-        } else {
-            render_error_page(&sc->body, 404, "Not Found");
-
-            sb_append_cstr(&sc->response, "HTTP/1.0 404 Not Found\r\n");
-            sb_append_cstr(&sc->response, "Content-Type: text/html\r\n");
-            sb_append_cstr(&sc->response, temp_sprintf("Content-Length: %zu\r\n", sc->body.count));
-            sb_append_cstr(&sc->response, "Connection: close\r\n");
-            sb_append_cstr(&sc->response, "\r\n");
-            sb_append_buf(&sc->response, sc->body.items, sc->body.count);
-        }
+        serve_resource(sc, "./resources/images/tore.png", "image/png");
     } else if (sv_eq(uri, sv_from_cstr("/urmom"))) {
-        render_error_page(&sc->body, 413, "Request Entity Too Large");
-
-        sb_append_cstr(&sc->response, "HTTP/1.0 413 Request Entity Too Large\r\n");
-        sb_append_cstr(&sc->response, "Content-Type: text/html\r\n");
-        sb_append_cstr(&sc->response, temp_sprintf("Content-Length: %zu\r\n", sc->body.count));
-        sb_append_cstr(&sc->response, "Connection: close\r\n");
-        sb_append_cstr(&sc->response, "\r\n");
-        sb_append_buf(&sc->response, sc->body.items, sc->body.count);
-    } else {
-        render_error_page(&sc->body, 404, "Not Found");
-
-        sb_append_cstr(&sc->response, "HTTP/1.0 404 Not Found\r\n");
-        sb_append_cstr(&sc->response, "Content-Type: text/html\r\n");
-        sb_append_cstr(&sc->response, temp_sprintf("Content-Length: %zu\r\n", sc->body.count));
-        sb_append_cstr(&sc->response, "Connection: close\r\n");
-        sb_append_cstr(&sc->response, "\r\n");
-        sb_append_buf(&sc->response, sc->body.items, sc->body.count);
-    }
-
-    String_View untransfered = sb_to_sv(sc->response);
-    while (untransfered.count > 0) {
-        ssize_t transfered = write(client_fd, untransfered.data, untransfered.count);
-        if (transfered < 0) {
-            fprintf(stderr, "ERROR: Could not write response: %s\n", strerror(errno));
+        serve_error(sc, 413);
+    } else if (sv_starts_with(uri, sv_from_cstr("/notif/"))) {
+        String_View notif_uri_prefix = sv_from_cstr("/notif/");
+        uri.count -= notif_uri_prefix.count;
+        uri.data += notif_uri_prefix.count;
+        char *endptr = NULL;
+        unsigned long notif_id = strtoul(uri.data, &endptr, 10);
+        size_t id_len = endptr - uri.data;
+        if (id_len == 0) {
+            // id was not provided
+            serve_error(sc, 404);
             return;
         }
-        untransfered.data += transfered;
-        untransfered.count -= transfered;
+        uri.count -= id_len;
+        uri.data  += id_len;
+        if (uri.count > 0) {
+            // garbage after id
+            serve_error(sc, 400);
+            return;
+        }
+        UNUSED(serve_notif(sc, notif_id));
+    } else {
+        serve_error(sc, 404);
     }
 }
 
@@ -928,11 +1137,7 @@ bool serve_run(Command *self, const char *program_name, int argc, char **argv)
 {
     UNUSED(self);
     UNUSED(program_name);
-    UNUSED(argc);
-    UNUSED(argv);
     bool result = true;
-    sqlite3 *db = open_tore_db();
-    if (!db) return_defer(false);
     // NOTE: We are intentionally not listening to the external addresses, because we are using a
     // custom scuffed implementation of HTTP protocol, which is incomplete and possibly insecure.
     // The `serve` command is meant to be used only locally by a single person. At least for now.
@@ -966,31 +1171,28 @@ bool serve_run(Command *self, const char *program_name, int argc, char **argv)
 
     err = listen(server_fd, 69);
     if (err != 0) {
-        fprintf(stderr, "ERRO: Could not listen to socket, it's too quiet: %s\n", strerror(errno));
+        fprintf(stderr, "ERROR: Could not listen to socket, it's too quiet: %s\n", strerror(errno));
         return_defer(false);
     }
 
     printf("Listening to http://%s:%d/\n", addr, port);
 
-    Serve_Context sc = {.db = db};
+    Serve_Context sc = {0};
     for (;;) {
         struct sockaddr_in client_addr;
         socklen_t client_addrlen = 0;
-        int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_addrlen);
-        if (client_fd < 0) {
+        sc.client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_addrlen);
+        if (sc.client_fd < 0) {
             fprintf(stderr, "ERROR: Could not accept connection. This is unacceptable! %s\n", strerror(errno));
             continue;
         }
 
-        if (txn_begin(db)) {
-            serve_request(&sc, client_fd);
-            txn_commit(db);
-        }
+        UNUSED(serve_request(&sc));
 
-        shutdown(client_fd, SHUT_WR);
+        shutdown(sc.client_fd, SHUT_WR);
         char buffer[4096];
-        while (read(client_fd, buffer, sizeof(buffer)) > 0);
-        close(client_fd);
+        while (read(sc.client_fd, buffer, sizeof(buffer)) > 0);
+        close(sc.client_fd);
         sc_reset(&sc);
         temp_reset();
     }
@@ -1002,7 +1204,6 @@ bool serve_run(Command *self, const char *program_name, int argc, char **argv)
 
 defer:
     // TODO: properly close the sockets on defer
-    if (db) sqlite3_close(db);
     return result;
 }
 

@@ -206,7 +206,7 @@ int main(int argc, char **argv)
     if (!nob_mkdir_if_not_exists(BUILD_FOLDER)) return 1;
     if (!build_sqlite3(&cmd)) return 1;
 
-    // Templates 
+    // Templates
     builder_compiler(&cmd);
     builder_common_flags(&cmd);
     builder_output(&cmd, BUILD_FOLDER"tt");
@@ -214,6 +214,7 @@ int main(int argc, char **argv)
     if (!cmd_run_sync_and_reset(&cmd)) return 1;
     if (!compile_template(&cmd, SRC_FOLDER"index_page.h.tt", BUILD_FOLDER"index_page.h")) return 1;
     if (!compile_template(&cmd, SRC_FOLDER"error_page.h.tt", BUILD_FOLDER"error_page.h")) return 1;
+    if (!compile_template(&cmd, SRC_FOLDER"notif_page.h.tt", BUILD_FOLDER"notif_page.h")) return 1;
 
     if (!generate_resource_bundle()) return 1;
 
@@ -256,7 +257,7 @@ int main(int argc, char **argv)
     }
 
     if (strcmp(command_name, "svg") == 0) {
-        cmd_append(&cmd, "convert", 
+        cmd_append(&cmd, "convert",
                 "-background", "None", "./assets/images/tore.svg",
                 "-resize", "32x32", "./assets/images/tore.png");
         if (!cmd_run_sync_and_reset(&cmd)) return 1;
