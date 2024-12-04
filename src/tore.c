@@ -995,7 +995,7 @@ void serve_error(Serve_Context *sc, int status_code)
     UNUSED(write_entire_sv(sc->client_fd, sb_to_sv(sc->response)));
 }
 
-bool serve_root(Serve_Context *sc)
+bool serve_index(Serve_Context *sc)
 {
     bool result = true;
     sqlite3 *db = open_tore_db();
@@ -1070,6 +1070,7 @@ void serve_resource(Serve_Context *sc, const char *resource_path, const char *co
 
 void serve_request(Serve_Context *sc)
 {
+    // TODO: should `serve` fire off reminders?
     // TODO: log queries
 
     // <Status-Line>\r\n<Header>\r\n<Header>\r\n<Header>\r\n<Header>\r\n<Header>\r\n\r\n
@@ -1103,7 +1104,7 @@ void serve_request(Serve_Context *sc)
     String_View uri =  sv_trim(sv_chop_by_delim(&status_line, ' '));
 
     if (sv_eq(uri, sv_from_cstr("/"))) {
-        UNUSED(serve_root(sc));
+        UNUSED(serve_index(sc));
     } else if (sv_eq(uri, sv_from_cstr("/favicon.ico"))) {
         serve_resource(sc, "./resources/images/tore.png", "image/png");
     } else if (sv_eq(uri, sv_from_cstr("/urmom"))) {
