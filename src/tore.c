@@ -155,6 +155,7 @@ typedef struct {
     int id;
     const char *title;
     const char *created_at;
+    const char *dismissed_at;
     int reminder_id;
     int group_id;    // something that uniquely identifies a group of notifications and it is computed as ifnull(reminder_id, -id)
 } Notification;
@@ -171,7 +172,13 @@ int load_notification_by_id(sqlite3 *db, int notif_id, Notification *notif)
     sqlite3_stmt *stmt = NULL;
 
     int ret = sqlite3_prepare_v2(db,
-        "SELECT id, title, datetime(created_at, 'localtime') as ts, reminder_id, ifnull(reminder_id, -id) as group_id "
+        "SELECT\n"
+        "    id,\n"
+        "    title,\n"
+        "    datetime(created_at, 'localtime'),\n"
+        "    datetime(dismissed_at, 'localtime'),\n"
+        "    reminder_id,\n"
+        "    ifnull(reminder_id, -id)\n"
         "FROM Notifications WHERE id = ?;",
         -1, &stmt, NULL);
     if (ret != SQLITE_OK) {
@@ -196,11 +203,21 @@ int load_notification_by_id(sqlite3 *db, int notif_id, Notification *notif)
     }
 
     int column = 0;
-    notif->id = sqlite3_column_int(stmt, column++);
-    notif->title = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
-    notif->created_at = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
-    notif->reminder_id = sqlite3_column_int(stmt, column++);
-    notif->group_id = sqlite3_column_int(stmt, column++);
+    int id = sqlite3_column_int(stmt, column++);
+    const char *title = (const char *)sqlite3_column_text(stmt, column++);
+    const char *created_at = (const char *)sqlite3_column_text(stmt, column++);
+    const char *dismissed_at = (const char *)sqlite3_column_text(stmt, column++);
+    int reminder_id = sqlite3_column_int(stmt, column++);
+    int group_id = sqlite3_column_int(stmt, column++);
+
+    *notif = (Notification) {
+        .id           = id,
+        .title        = title        ? temp_strdup(title)        : NULL,
+        .created_at   = created_at   ? temp_strdup(created_at)   : NULL,
+        .dismissed_at = dismissed_at ? temp_strdup(dismissed_at) : NULL,
+        .reminder_id  = reminder_id,
+        .group_id     = group_id,
+    };
 
 defer:
     if (stmt) sqlite3_finalize(stmt);
@@ -213,7 +230,13 @@ bool load_active_notifications_of_group(sqlite3 *db, int group_id, Notifications
     sqlite3_stmt *stmt = NULL;
 
     int ret = sqlite3_prepare_v2(db,
-        "SELECT id, title, datetime(created_at, 'localtime') as ts, reminder_id, ifnull(reminder_id, -id) as group_id "
+        "SELECT\n"
+        "    id,\n"
+        "    title,\n"
+        "    datetime(created_at, 'localtime') as ts,\n"
+        "    datetime(dimissed_at, 'localtime'),\n"
+        "    reminder_id,\n"
+        "    ifnull(reminder_id, -id) as group_id\n"
         "FROM Notifications WHERE dismissed_at IS NULL AND group_id = ? ORDER BY ts;",
         -1, &stmt, NULL);
     if (ret != SQLITE_OK) {
@@ -229,16 +252,18 @@ bool load_active_notifications_of_group(sqlite3 *db, int group_id, Notifications
     for (ret = sqlite3_step(stmt); ret == SQLITE_ROW; ret = sqlite3_step(stmt)) {
         int column = 0;
         int id = sqlite3_column_int(stmt, column++);
-        const char *title = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
-        const char *created_at = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
+        const char *title = (const char *)sqlite3_column_text(stmt, column++);
+        const char *created_at = (const char *)sqlite3_column_text(stmt, column++);
+        const char *dismissed_at = (const char *)sqlite3_column_text(stmt, column++);
         int reminder_id = sqlite3_column_int(stmt, column++);
         int group_id = sqlite3_column_int(stmt, column++);
         da_append(ns, ((Notification) {
-            .id = id,
-            .title = title,
-            .created_at = created_at,
-            .reminder_id = reminder_id,
-            .group_id = group_id,
+            .id           = id,
+            .title        = title        ? temp_strdup(title)        : NULL,
+            .created_at   = created_at   ? temp_strdup(created_at)   : NULL,
+            .dismissed_at = dismissed_at ? temp_strdup(dismissed_at) : NULL,
+            .reminder_id  = reminder_id,
+            .group_id     = group_id,
         }));
     }
 
