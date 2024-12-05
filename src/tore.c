@@ -278,7 +278,7 @@ defer:
 }
 
 typedef struct {
-    int notif_id;
+    int notif_id;            // The idea of a Singleton Notification in the Group. Does not make much sense if group_count > 0. In that case it's probably the id of the first one, but I wouldn't count on that
     const char *title;       // TODO: maybe in case of group_id > 0 the title should be the title of the corresponding reminder?
     const char *created_at;  // TODO: maybe in case of group_id > 0 the created_at should be the created_at of the latest notification?
     int reminder_id;
@@ -832,6 +832,7 @@ bool version_run(Command *self, const char *program_name, int argc, char **argv)
     UNUSED(argv);
     fprintf(stderr, "TORE GIT HASH:     "GIT_HASH"\n");
     fprintf(stderr, "SQLITE3 VERSION:   "SQLITE_VERSION"\n");
+    // TODO: bake build datetime into `tore version`
     return true;
 }
 
