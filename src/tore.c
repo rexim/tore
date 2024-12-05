@@ -1150,7 +1150,7 @@ void serve_request(Serve_Context *sc)
         uri.data  += id_len;
         if (uri.count > 0) {
             // garbage after id
-            serve_error(sc, 400);
+            serve_error(sc, 404);
             return;
         }
         UNUSED(serve_notif(sc, notif_id));
