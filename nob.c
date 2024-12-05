@@ -268,3 +268,5 @@ int main(int argc, char **argv)
     return 1;
 }
 // TODO: automatic record/replay testing
+// TODO: merge src_build/tt.c into nob.c
+//   It does not need to be a separate tool. It's all written in the same language.
