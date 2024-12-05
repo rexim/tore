@@ -2,6 +2,8 @@
 <html>
   <head>
     <title>%ERROR_CODE% %ERROR_NAME%</title>
+    <link rel="stylesheet" type="text/css" href="/css/reset.css">
+    <link rel="stylesheet" type="text/css" href="/css/main.css">
   </head>
   <body>
     <h1>%ERROR_CODE% %ERROR_NAME%</h1>

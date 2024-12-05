@@ -116,6 +116,8 @@ typedef struct {
 
 Resource resources[] = {
     { .file_path = "./resources/images/tore.png" },
+    { .file_path = "./resources/css/reset.css" },
+    { .file_path = "./resources/css/main.css" },
 };
 
 #define genf(out, ...) \
@@ -132,12 +134,15 @@ bool generate_resource_bundle(void)
     Nob_String_Builder content = {0};
     FILE *out = NULL;
 
+    const char *bundle_h_path = BUILD_FOLDER"bundle.h";
+
     // bundle  = [aaaaaaaaabbbbb]
     //            ^        ^
     // content = []
     // 0, 9
 
     for (size_t i = 0; i < NOB_ARRAY_LEN(resources); ++i) {
+        nob_log(NOB_INFO, "Bundling %s into %s", resources[i].file_path, bundle_h_path);
         content.count = 0;
         if (!nob_read_entire_file(resources[i].file_path, &content)) nob_return_defer(false);
         resources[i].offset = bundle.count;
@@ -146,7 +151,6 @@ bool generate_resource_bundle(void)
         nob_da_append(&bundle, 0);
     }
 
-    const char *bundle_h_path = BUILD_FOLDER"bundle.h";
     out = fopen(bundle_h_path, "wb");
     if (out == NULL) {
         nob_log(NOB_ERROR, "Could not open file %s for writing: %s", bundle_h_path, strerror(errno));
@@ -179,8 +183,6 @@ bool generate_resource_bundle(void)
     }
     genf(out, "};");
     genf(out, "#endif // BUNDLE_H_");
-
-    nob_log(NOB_INFO, "Generated %s", bundle_h_path);
 
 defer:
     if (out) fclose(out);

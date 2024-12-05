@@ -2,6 +2,8 @@
 <html>
   <head>
     <title>Tore - Notification - %INT(notif.id);%</title>
+    <link rel="stylesheet" type="text/css" href="/css/reset.css">
+    <link rel="stylesheet" type="text/css" href="/css/main.css">
   </head>
   <body>
     <h1>Tore - Notification - %INT(notif.id);%</h1>

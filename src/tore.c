@@ -1133,6 +1133,10 @@ void serve_request(Serve_Context *sc)
         UNUSED(serve_index(sc));
     } else if (sv_eq(uri, sv_from_cstr("/favicon.ico"))) {
         serve_resource(sc, "./resources/images/tore.png", "image/png");
+    } else if (sv_eq(uri, sv_from_cstr("/css/reset.css"))) {
+        serve_resource(sc, "./resources/css/reset.css", "text/css");
+    } else if (sv_eq(uri, sv_from_cstr("/css/main.css"))) {
+        serve_resource(sc, "./resources/css/main.css", "text/css");
     } else if (sv_eq(uri, sv_from_cstr("/urmom"))) {
         serve_error(sc, 413);
     } else if (sv_starts_with(uri, sv_from_cstr("/notif/"))) {

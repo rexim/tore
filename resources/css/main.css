@@ -1,0 +1,61 @@
+html {
+    background: #101020;
+    height: 100%;
+    color: #FFFFFF;
+}
+
+body {
+    background: #151525;
+    width: 720px;
+    height: 100%;
+    margin: auto;
+    padding-left: 50px;
+    padding-right: 50px;
+}
+
+p {
+    padding-bottom: 3px;
+}
+
+/* unvisited link */
+a:link {
+  color: hotpink;
+}
+
+/* visited link */
+a:visited {
+  color: hotpink;
+}
+
+/* mouse over link */
+a:hover {
+  color: hotpink;
+}
+
+/* selected link */
+a:active {
+  color: hotpink;
+} 
+
+h1 {
+    font-size: 32px;
+    font-weight: bold;
+    padding-bottom: 20px;
+    padding-top: 20px;
+    text-align: center;
+}
+
+h2 {
+    font-size: 28px;
+    font-weight: bold;
+    padding-bottom: 20px;
+    padding-top: 20px;
+}
+
+ul {
+    list-style-type: circle;
+}
+
+li {
+    padding-bottom: 3px;
+}
