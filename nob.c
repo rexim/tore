@@ -7,14 +7,16 @@
 typedef enum {
     BF_FORCE,
     BF_ASAN,
+    BF_WATCH,
     BF_HELP,
     COUNT_BUILD_FLAGS
 } Build_Flag_Index;
-static_assert(COUNT_BUILD_FLAGS == 3, "Amount of build flags has changed");
+static_assert(COUNT_BUILD_FLAGS == 4, "Amount of build flags has changed");
 static Flag build_flags[COUNT_BUILD_FLAGS] = {
-    [BF_FORCE] = {.name = "-f",    .description = "Force full rebuild"},
-    [BF_ASAN]  = {.name = "-asan", .description = "Enable address sanitizer"},
-    [BF_HELP]  = {.name = "-h",    .description = "Print build flags"},
+    [BF_FORCE] = {.name = "-f",     .description = "Force full rebuild"},
+    [BF_ASAN]  = {.name = "-asan",  .description = "Enable address sanitizer"},
+    [BF_WATCH] = {.name = "-watch", .description = "Run process in watch mode and rebuild on any source code changes"},
+    [BF_HELP]  = {.name = "-h",     .description = "Print build flags"},
 };
 
 // Folder must end with forward slash /
@@ -114,6 +116,7 @@ typedef struct {
     size_t size;
 } Resource;
 
+// TODO: maybe automatically recursively collect all the *.png, *.css files in "./resources/"?
 Resource resources[] = {
     { .file_path = "./resources/images/tore.png" },
     { .file_path = "./resources/css/reset.css" },
@@ -191,6 +194,36 @@ defer:
     return result;
 }
 
+bool build_tore(Cmd *cmd)
+{
+    // Templates
+    builder_compiler(cmd);
+    builder_common_flags(cmd);
+    builder_output(cmd, BUILD_FOLDER"tt");
+    builder_inputs(cmd, SRC_BUILD_FOLDER"tt.c");
+    if (!cmd_run_sync_and_reset(cmd)) return false;
+    if (!compile_template(cmd, SRC_FOLDER"index_page.h.tt", BUILD_FOLDER"index_page.h")) return false;
+    if (!compile_template(cmd, SRC_FOLDER"error_page.h.tt", BUILD_FOLDER"error_page.h")) return false;
+    if (!compile_template(cmd, SRC_FOLDER"notif_page.h.tt", BUILD_FOLDER"notif_page.h")) return false;
+    if (!generate_resource_bundle()) return false;
+
+    char *git_hash = get_git_hash(cmd);
+    builder_compiler(cmd);
+    builder_common_flags(cmd);
+    if (!build_flags[BF_ASAN].value) cmd_append(cmd, "-static");
+    if (git_hash) {
+        cmd_append(cmd, temp_sprintf("-DGIT_HASH=\"%s\"", git_hash));
+        free(git_hash);
+    } else {
+        cmd_append(cmd, temp_sprintf("-DGIT_HASH=\"Unknown\""));
+    }
+    builder_output(cmd, TORE_BIN_PATH);
+    builder_inputs(cmd, SRC_FOLDER"tore.c", SQLITE3_OBJ_PATH);
+    if (!nob_cmd_run_sync_and_reset(cmd)) return false;
+
+    return true;
+}
+
 int main(int argc, char **argv)
 {
     NOB_GO_REBUILD_URSELF_PLUS(argc, argv, "./src_build/flags.c");
@@ -207,55 +240,61 @@ int main(int argc, char **argv)
 
     if (!nob_mkdir_if_not_exists(BUILD_FOLDER)) return 1;
     if (!build_sqlite3(&cmd)) return 1;
-
-    // Templates
-    builder_compiler(&cmd);
-    builder_common_flags(&cmd);
-    builder_output(&cmd, BUILD_FOLDER"tt");
-    builder_inputs(&cmd, SRC_BUILD_FOLDER"tt.c");
-    if (!cmd_run_sync_and_reset(&cmd)) return 1;
-    if (!compile_template(&cmd, SRC_FOLDER"index_page.h.tt", BUILD_FOLDER"index_page.h")) return 1;
-    if (!compile_template(&cmd, SRC_FOLDER"error_page.h.tt", BUILD_FOLDER"error_page.h")) return 1;
-    if (!compile_template(&cmd, SRC_FOLDER"notif_page.h.tt", BUILD_FOLDER"notif_page.h")) return 1;
-
-    if (!generate_resource_bundle()) return 1;
-
-    char *git_hash = get_git_hash(&cmd);
-    builder_compiler(&cmd);
-    builder_common_flags(&cmd);
-    if (!build_flags[BF_ASAN].value) cmd_append(&cmd, "-static");
-    if (git_hash) {
-        cmd_append(&cmd, temp_sprintf("-DGIT_HASH=\"%s\"", git_hash));
-        free(git_hash);
-    } else {
-        cmd_append(&cmd, temp_sprintf("-DGIT_HASH=\"Unknown\""));
-    }
-    builder_output(&cmd, TORE_BIN_PATH);
-    builder_inputs(&cmd, SRC_FOLDER"tore.c", SQLITE3_OBJ_PATH);
-    if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
+    if (!build_tore(&cmd)) return 1;
 
     if (argc <= 0) return 0;
     const char *command_name = shift(argv, argc);
 
-    if (strcmp(command_name, "run") == 0 || strcmp(command_name, "chroot") == 0) {
+    if (strcmp(command_name, "run") == 0) {
         // NOTE: this command runs the developed tore with some special
         // environment variables set so it does not damage your "production"
         // database file.
-        // NOTE: the name of the command is `chroot` because of historical
-        // reasons. It was originally using chroot, but it turned out that just
-        // setting a bunch of environment variables is enough. Maybe it should
-        // be renamed to something else in the future.
         const char *current_dir = get_current_dir_temp();
         if (current_dir == NULL) return 1;
         if (!set_environment_variable("HOME", temp_sprintf("%s/"BUILD_FOLDER, current_dir))) return 1;
         if (!set_environment_variable("TORE_TRACE_MIGRATION_QUERIES", "1")) return 1;
         cmd_append(&cmd, TORE_BIN_PATH);
         da_append_many(&cmd, argv, argc);
-        if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
-        if (strcmp(command_name, "chroot") == 0) {
-            nob_log(WARNING, "`chroot` command name is deprecated, just call it as `run`");
+        if (build_flags[BF_WATCH].value) {
+#ifdef _WIN32
+            nob_log(ERROR, "Watch mode is not supported on Windows yet");
+            return 1;
+#else // _WIN32
+            Proc p = nob_cmd_run_async_and_reset(&cmd);
+            File_Paths tore_inputs = {0};
+            // TODO: this is an extra place to modify if the dependencies have changed
+            da_append(&tore_inputs, SRC_FOLDER"index_page.h.tt");
+            da_append(&tore_inputs, SRC_FOLDER"error_page.h.tt");
+            da_append(&tore_inputs, SRC_FOLDER"notif_page.h.tt");
+            da_append(&tore_inputs, SRC_FOLDER"tore.c");
+            da_append(&tore_inputs, SQLITE3_OBJ_PATH);
+            da_append(&tore_inputs, "./resources/images/tore.png");
+            da_append(&tore_inputs, "./resources/css/reset.css");
+            da_append(&tore_inputs, "./resources/css/main.css");
+            for (;;) {
+                // TODO: check if the process have died at this point.
+                //   If the process has died, we should probably just finish the watch mode
+                // TODO: check if nob itself requires a rebuild and restart it.
+                int yes = nob_needs_rebuild(TORE_BIN_PATH, tore_inputs.items, tore_inputs.count);
+                if (yes < 0) return 1;
+                if (yes) {
+                    if (build_tore(&cmd)) {
+                        kill(p, SIGINT); // TODO: we need a cross-platform nob_kill of some sort
+                        cmd_append(&cmd, TORE_BIN_PATH);
+                        da_append_many(&cmd, argv, argc);
+                        p = nob_cmd_run_async_and_reset(&cmd);
+                    } else {
+                        cmd_append(&cmd, "touch", TORE_BIN_PATH); // TODO: don't depend on POSIX utils
+                        if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
+                    }
+                }
+                usleep(100*1000); // TODO: don depend on POSIX api
+            }
+#endif // _WIN32
+        } else {
+            if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
+            return 0;
         }
-        return 0;
     }
 
     if (strcmp(command_name, "svg") == 0) {
