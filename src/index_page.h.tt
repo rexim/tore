@@ -1,39 +1,29 @@
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Tore</title>
-    <link rel="stylesheet" type="text/css" href="/css/reset.css">
-    <link rel="stylesheet" type="text/css" href="/css/main.css">
-  </head>
-  <body>
-    <h1>Tore</h1>
-    <h2>Notifications:</h2>
-    <ul>
-    %if (notifs.count > 0) {%
-        %for (size_t i = 0; i < notifs.count; ++i) {%
-            %Grouped_Notification *it = &notifs.items[i];%
-            %assert(it->group_count > 0);%
-            <li>
-            %if (it->group_count == 1) {%
-                <a href="/notif/%INT(it->notif_id);%">%ESCAPED_OUT(it->title, strlen(it->title));%</a>
-            %} else {%
-                [%INT(it->group_count);%] %ESCAPED_OUT(it->title, strlen(it->title));%
-            %}%
-            </li>
+<h1>Tore</h1>
+<h2>Notifications:</h2>
+<ul>
+%if (notifs.count > 0) {%
+    %for (size_t i = 0; i < notifs.count; ++i) {%
+        %Grouped_Notification *it = &notifs.items[i];%
+        %assert(it->group_count > 0);%
+        <li>
+        %if (it->group_count == 1) {%
+            <a href="/notif/%INT(it->notif_id);%">%ESCAPED_OUT(it->title, strlen(it->title));%</a>
+        %} else {%
+            [%INT(it->group_count);%] %ESCAPED_OUT(it->title, strlen(it->title));%
         %}%
-    %} else {%
-        <p>No notifications</p>
+        </li>
     %}%
-    </ul>
-    <h2>Reminders:</h2>
-    <ul>
-    %if (reminders.count > 0) {%
-        %for (size_t i = 0; i < reminders.count; ++i) {%
-          <li>%ESCAPED_OUT(reminders.items[i].title, strlen(reminders.items[i].title));%</li>
-        %}%
-    %} else {%
-        <p>No reminders</p>
+%} else {%
+    <p>No notifications</p>
+%}%
+</ul>
+<h2>Reminders:</h2>
+<ul>
+%if (reminders.count > 0) {%
+    %for (size_t i = 0; i < reminders.count; ++i) {%
+      <li>%ESCAPED_OUT(reminders.items[i].title, strlen(reminders.items[i].title));%</li>
     %}%
-    </ul>
-  </body>
-</html>
+%} else {%
+    <p>No reminders</p>
+%}%
+</ul>

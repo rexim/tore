@@ -196,6 +196,7 @@ struct {
     const char *src_path;
     const char *dst_path;
 } page_templates[] = {
+    { .src_path = SRC_FOLDER"root_page.h.tt",  .dst_path = BUILD_FOLDER"root_page.h" },
     { .src_path = SRC_FOLDER"index_page.h.tt", .dst_path = BUILD_FOLDER"index_page.h" },
     { .src_path = SRC_FOLDER"error_page.h.tt", .dst_path = BUILD_FOLDER"error_page.h" },
     { .src_path = SRC_FOLDER"notif_page.h.tt", .dst_path = BUILD_FOLDER"notif_page.h" },

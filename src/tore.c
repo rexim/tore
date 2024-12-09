@@ -727,15 +727,23 @@ void sb_append_html_escaped_buf(String_Builder *sb, const char *buf, size_t size
     }
 }
 
+// TODO: Page Template C code - semicolon implied or not?
+//   OUT() macro has no semicolon. Some other macros add their own semicolon.
+//   We need to establish convention - do we imply the semicolon or not?
+
 void render_index_page(String_Builder *sb, Grouped_Notifications notifs, Reminders reminders)
 {
 #define OUT(buf, size) sb_append_buf(sb, buf, size)
 #define ESCAPED_OUT(buf, size) sb_append_html_escaped_buf(sb, buf, size)
 #define INT(x) sb_append_cstr(sb, temp_sprintf("%d", (x)))
-#include "index_page.h"
+#define PAGE_BODY "index_page.h"
+#define PAGE_TITLE
+#include "root_page.h"
+#undef PAGE_TITLE
+#undef PAGE_BODY
 #undef INT
-#undef OUT
 #undef ESCAPED_OUT
+#undef OUT
 }
 
 void render_error_page(String_Builder *sb, int error_code, const char *error_name)
@@ -743,9 +751,14 @@ void render_error_page(String_Builder *sb, int error_code, const char *error_nam
 #define OUT(buf, size) sb_append_buf(sb, buf, size)
 #define ERROR_CODE sb_append_cstr(sb, temp_sprintf("%d", error_code));
 #define ERROR_NAME sb_append_cstr(sb, error_name);
-#include "error_page.h"
+#define PAGE_BODY "error_page.h"
+#define PAGE_TITLE sb_append_cstr(sb, " - "); ERROR_CODE sb_append_cstr(sb, " - "); ERROR_NAME
+#include "root_page.h"
+#undef PAGE_TITLE
+#undef PAGE_BODY
 #undef ERROR_CODE
 #undef ERROR_NAME
+#undef OUT
 }
 
 void render_notif_page(String_Builder *sb, Notification notif)
@@ -753,7 +766,10 @@ void render_notif_page(String_Builder *sb, Notification notif)
 #define OUT(buf, size) sb_append_buf(sb, buf, size)
 #define ESCAPED_OUT(buf, size) sb_append_html_escaped_buf(sb, buf, size)
 #define INT(x) sb_append_cstr(sb, temp_sprintf("%d", (x)))
-#include "notif_page.h"
+#define PAGE_BODY "notif_page.h"
+#define PAGE_TITLE sb_append_cstr(sb, " - Notification - "); INT(notif.id);
+#include "root_page.h"
+#undef PAGE_BODY
 #undef INT
 #undef OUT
 #undef ESCAPED_OUT
