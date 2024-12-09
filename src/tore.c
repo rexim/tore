@@ -769,10 +769,23 @@ void render_notif_page(String_Builder *sb, Notification notif)
 #define PAGE_BODY "notif_page.h"
 #define PAGE_TITLE sb_append_cstr(sb, " - Notification - "); INT(notif.id);
 #include "root_page.h"
+#undef PAGE_TITLE
 #undef PAGE_BODY
 #undef INT
 #undef OUT
 #undef ESCAPED_OUT
+}
+
+void render_version_page(String_Builder *sb)
+{
+#define OUT(buf, size) sb_append_buf(sb, buf, size)
+#define PAGE_BODY "version_page.h"
+#define PAGE_TITLE sb_append_cstr(sb, " - "); sb_append_cstr(sb, GIT_HASH);
+#include "root_page.h"
+#undef PAGE_TITLE
+#undef PAGE_BODY
+#undef ESCAPED_OUT
+#undef OUT
 }
 
 sqlite3 *open_tore_db(void)
@@ -1037,7 +1050,7 @@ void serve_error(Serve_Context *sc, int status_code)
     UNUSED(write_entire_sv(sc->client_fd, sb_to_sv(sc->response)));
 }
 
-bool serve_index(Serve_Context *sc)
+void serve_index(Serve_Context *sc)
 {
     bool result = true;
     sqlite3 *db = open_tore_db();
@@ -1063,7 +1076,6 @@ defer:
         if (result) result = txn_commit(db);
         sqlite3_close(db);
     }
-    return result;
 }
 
 bool serve_notif(Serve_Context *sc, int notif_id)
@@ -1097,15 +1109,22 @@ defer:
     return result;
 }
 
+void serve_version(Serve_Context *sc)
+{
+    render_version_page(&sc->body);
+    http_render_response(&sc->response, 200, "text/html", sb_to_sv(sc->body));
+    UNUSED(write_entire_sv(sc->client_fd, sb_to_sv(sc->response)));
+}
+
 void serve_resource(Serve_Context *sc, const char *resource_path, const char *content_type)
 {
-    Resource *favicon = find_resource(resource_path);
-    if (!favicon) {
+    Resource *resource = find_resource(resource_path);
+    if (!resource) {
         serve_error(sc, 404);
         return;
     }
 
-    sb_append_buf(&sc->body, &bundle[favicon->offset], favicon->size);
+    sb_append_buf(&sc->body, &bundle[resource->offset], resource->size);
     http_render_response(&sc->response, 200, content_type, sb_to_sv(sc->body));
     UNUSED(write_entire_sv(sc->client_fd, sb_to_sv(sc->response)));
 }
@@ -1146,16 +1165,30 @@ void serve_request(Serve_Context *sc)
     String_View uri =  sv_trim(sv_chop_by_delim(&status_line, ' '));
 
     if (sv_eq(uri, sv_from_cstr("/"))) {
-        UNUSED(serve_index(sc));
-    } else if (sv_eq(uri, sv_from_cstr("/favicon.ico"))) {
+        serve_index(sc);
+        return;
+    }
+    if (sv_eq(uri, sv_from_cstr("/version"))) {
+        serve_version(sc);
+        return;
+    }
+    if (sv_eq(uri, sv_from_cstr("/favicon.ico"))) {
         serve_resource(sc, "./resources/images/tore.png", "image/png");
-    } else if (sv_eq(uri, sv_from_cstr("/css/reset.css"))) {
+        return;
+    }
+    if (sv_eq(uri, sv_from_cstr("/css/reset.css"))) {
         serve_resource(sc, "./resources/css/reset.css", "text/css");
-    } else if (sv_eq(uri, sv_from_cstr("/css/main.css"))) {
+        return;
+    }
+    if (sv_eq(uri, sv_from_cstr("/css/main.css"))) {
         serve_resource(sc, "./resources/css/main.css", "text/css");
-    } else if (sv_eq(uri, sv_from_cstr("/urmom"))) {
+        return;
+    }
+    if (sv_eq(uri, sv_from_cstr("/urmom"))) {
         serve_error(sc, 413);
-    } else if (sv_starts_with(uri, sv_from_cstr("/notif/"))) {
+        return;
+    }
+    if (sv_starts_with(uri, sv_from_cstr("/notif/"))) {
         String_View notif_uri_prefix = sv_from_cstr("/notif/");
         uri.count -= notif_uri_prefix.count;
         uri.data += notif_uri_prefix.count;
@@ -1175,9 +1208,10 @@ void serve_request(Serve_Context *sc)
             return;
         }
         UNUSED(serve_notif(sc, notif_id));
-    } else {
-        serve_error(sc, 404);
+        return;
     }
+
+    serve_error(sc, 404);
 }
 
 bool serve_run(Command *self, const char *program_name, int argc, char **argv)
