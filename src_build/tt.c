@@ -4,6 +4,14 @@
 #include <stdint.h>
 #include <string.h>
 
+// TODO: Document the whole tt paradigm (I could probably write an entire blog post about it)
+// - C code mixed with text,
+// - Inclusion of compiled templates into the body of C functions with macro parameters like OUT, ESCAPE_OUT, etc.,
+// - Implied semicolons in template parameter macros,
+// - Nested macros with %#include BODY% pattern,
+// - HTML escaping,
+// - ...
+
 #define NOB_IMPLEMENTATION
 #define NOB_STRIP_PREFIX
 #include "nob.h"
