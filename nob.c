@@ -15,7 +15,7 @@ static_assert(COUNT_BUILD_FLAGS == 4, "Amount of build flags has changed");
 static Flag build_flags[COUNT_BUILD_FLAGS] = {
     [BF_FORCE] = {.name = "-f",     .description = "Force full rebuild"},
     [BF_ASAN]  = {.name = "-asan",  .description = "Enable address sanitizer"},
-    [BF_WATCH] = {.name = "-watch", .description = "Run process in watch mode and rebuild on any source code changes"},
+    [BF_WATCH] = {.name = "-watch", .description = "Run process in watch mode and rebuild on any source code changes. Only works for `run` command."},
     [BF_HELP]  = {.name = "-h",     .description = "Print build flags"},
 };
 
@@ -23,6 +23,7 @@ static Flag build_flags[COUNT_BUILD_FLAGS] = {
 #define BUILD_FOLDER "./build/"
 #define SRC_FOLDER "./src/"
 #define SRC_BUILD_FOLDER "./src_build/"
+#define RESOURCES_FOLDER "./resources/"
 #define GIT_HASH_FILE BUILD_FOLDER"git-hash.txt"
 #define TORE_BIN_PATH (build_flags[BF_ASAN].value ? BUILD_FOLDER"tore-asan" : BUILD_FOLDER"tore")
 #define SQLITE3_OBJ_PATH (build_flags[BF_ASAN].value ? BUILD_FOLDER"sqlite3-asan.o" : BUILD_FOLDER"sqlite3.o")
@@ -110,17 +111,15 @@ bool compile_template(Cmd *cmd, const char *src_path, const char *dst_path)
     return true;
 }
 
-typedef struct {
+// TODO: maybe automatically recursively collect all the *.png, *.css files in "./resources/"?
+struct {
     const char *file_path;
     size_t offset;
     size_t size;
-} Resource;
-
-// TODO: maybe automatically recursively collect all the *.png, *.css files in "./resources/"?
-Resource resources[] = {
-    { .file_path = "./resources/images/tore.png" },
-    { .file_path = "./resources/css/reset.css" },
-    { .file_path = "./resources/css/main.css" },
+} resources[] = {
+    { .file_path = RESOURCES_FOLDER"images/tore.png" },
+    { .file_path = RESOURCES_FOLDER"css/reset.css"   },
+    { .file_path = RESOURCES_FOLDER"css/main.css"    },
 };
 
 #define genf(out, ...) \
@@ -128,7 +127,6 @@ Resource resources[] = {
         fprintf((out), __VA_ARGS__); \
         fprintf((out), " // %s:%d\n", __FILE__, __LINE__); \
     } while(0)
-
 
 bool generate_resource_bundle(void)
 {
@@ -194,6 +192,15 @@ defer:
     return result;
 }
 
+struct {
+    const char *src_path;
+    const char *dst_path;
+} page_templates[] = {
+    { .src_path = SRC_FOLDER"index_page.h.tt", .dst_path = BUILD_FOLDER"index_page.h" },
+    { .src_path = SRC_FOLDER"error_page.h.tt", .dst_path = BUILD_FOLDER"error_page.h" },
+    { .src_path = SRC_FOLDER"notif_page.h.tt", .dst_path = BUILD_FOLDER"notif_page.h" },
+};
+
 bool build_tore(Cmd *cmd)
 {
     // Templates
@@ -202,9 +209,11 @@ bool build_tore(Cmd *cmd)
     builder_output(cmd, BUILD_FOLDER"tt");
     builder_inputs(cmd, SRC_BUILD_FOLDER"tt.c");
     if (!cmd_run_sync_and_reset(cmd)) return false;
-    if (!compile_template(cmd, SRC_FOLDER"index_page.h.tt", BUILD_FOLDER"index_page.h")) return false;
-    if (!compile_template(cmd, SRC_FOLDER"error_page.h.tt", BUILD_FOLDER"error_page.h")) return false;
-    if (!compile_template(cmd, SRC_FOLDER"notif_page.h.tt", BUILD_FOLDER"notif_page.h")) return false;
+    for (size_t i = 0; i < ARRAY_LEN(page_templates); ++i) {
+        if (!compile_template(cmd, page_templates[i].src_path, page_templates[i].dst_path)) {
+            return false;
+        }
+    }
     if (!generate_resource_bundle()) return false;
 
     char *git_hash = get_git_hash(cmd);
@@ -263,14 +272,14 @@ int main(int argc, char **argv)
             Proc p = nob_cmd_run_async_and_reset(&cmd);
             File_Paths tore_inputs = {0};
             // TODO: this is an extra place to modify if the dependencies have changed
-            da_append(&tore_inputs, SRC_FOLDER"index_page.h.tt");
-            da_append(&tore_inputs, SRC_FOLDER"error_page.h.tt");
-            da_append(&tore_inputs, SRC_FOLDER"notif_page.h.tt");
             da_append(&tore_inputs, SRC_FOLDER"tore.c");
             da_append(&tore_inputs, SQLITE3_OBJ_PATH);
-            da_append(&tore_inputs, "./resources/images/tore.png");
-            da_append(&tore_inputs, "./resources/css/reset.css");
-            da_append(&tore_inputs, "./resources/css/main.css");
+            for (size_t i = 0; i < ARRAY_LEN(page_templates); ++i) {
+                da_append(&tore_inputs, page_templates[i].src_path);
+            }
+            for (size_t i = 0; i < ARRAY_LEN(resources); ++i) {
+                da_append(&tore_inputs, resources[i].file_path);
+            }
             for (;;) {
                 // TODO: check if the process have died at this point.
                 //   If the process has died, we should probably just finish the watch mode
@@ -284,11 +293,13 @@ int main(int argc, char **argv)
                         da_append_many(&cmd, argv, argc);
                         p = nob_cmd_run_async_and_reset(&cmd);
                     } else {
-                        cmd_append(&cmd, "touch", TORE_BIN_PATH); // TODO: don't depend on POSIX utils
+                        cmd_append(&cmd, "touch", TORE_BIN_PATH); // TODO: don't depend on external POSIX utils for "touching" the binary
                         if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
                     }
                 }
-                usleep(100*1000); // TODO: don depend on POSIX api
+                // TODO: Use file watch mechanisms of the available Operating System
+                //   May require implementing file watch mechanism in nob
+                usleep(100*1000); // TODO: don't depend on POSIX api for sleeping
             }
 #endif // _WIN32
         } else {
