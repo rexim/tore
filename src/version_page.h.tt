@@ -1,3 +1,5 @@
 <h1>Version</h1>
+<div class="block">
 <p>GIT HASH: %ESCAPED(GIT_HASH)%</p>
 <p>SQLITE VERSION: %ESCAPED(SQLITE_VERSION)%</p>
+</div>

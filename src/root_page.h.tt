@@ -6,6 +6,8 @@
     <link rel="stylesheet" type="text/css" href="/css/main.css">
   </head>
   <body>
+    <div class="page">
     %#include PAGE_BODY%
+    </div>
   </body>
 </html>

@@ -1,8 +1,9 @@
-<h1>Tore - Notification - %INT(notif.id);%</h1>
 <h2>%ESCAPED(notif.title);%</h2>
+<div class="block">
 <p>Created at %ESCAPED(notif.created_at);%</p>
 %if (notif.dismissed_at) {%
     <p>Dismissed at %ESCAPED(notif.dismissed_at);%</p>
 %} else {%
     <p>Not dismissed yet</p>
 %}%
+</div>

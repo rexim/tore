@@ -9,47 +9,49 @@ body {
     width: 720px;
     height: 100%;
     margin: auto;
-    padding-left: 50px;
-    padding-right: 50px;
+}
+
+.page {
+    padding-left: 60px;
+    padding-right: 60px;
+    padding-top: 20px;
+    padding-bottom: 20px;
+}
+
+.block {
+    padding-top: 30px;
 }
 
 p {
     padding-bottom: 3px;
 }
 
-/* unvisited link */
 a:link {
-  color: hotpink;
+    color: hotpink;
 }
 
-/* visited link */
 a:visited {
-  color: hotpink;
+    color: hotpink;
 }
 
-/* mouse over link */
 a:hover {
-  color: hotpink;
+    color: hotpink;
 }
 
-/* selected link */
 a:active {
-  color: hotpink;
+    color: hotpink;
 } 
 
 h1 {
     font-size: 32px;
     font-weight: bold;
-    padding-bottom: 20px;
-    padding-top: 20px;
     text-align: center;
 }
 
 h2 {
     font-size: 28px;
     font-weight: bold;
-    padding-bottom: 20px;
-    padding-top: 20px;
+    padding-top: 30px;
 }
 
 ul {

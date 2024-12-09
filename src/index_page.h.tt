@@ -1,6 +1,6 @@
 <h1>Tore</h1>
 <h2>Notifications:</h2>
-<ul>
+<ul class="block">
 %if (notifs.count > 0) {%
     %for (size_t i = 0; i < notifs.count; ++i) {%
         %Grouped_Notification *it = &notifs.items[i];%
@@ -18,7 +18,7 @@
 %}%
 </ul>
 <h2>Reminders:</h2>
-<ul>
+<ul class="block">
 %if (reminders.count > 0) {%
     %for (size_t i = 0; i < reminders.count; ++i) {%
       <li>%ESCAPED(reminders.items[i].title);%</li>
