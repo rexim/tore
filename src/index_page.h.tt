@@ -7,9 +7,9 @@
         %assert(it->group_count > 0);%
         <li>
         %if (it->group_count == 1) {%
-            <a href="/notif/%INT(it->notif_id);%">%ESCAPED_OUT(it->title, strlen(it->title));%</a>
+            <a href="/notif/%INT(it->notif_id);%">%ESCAPED(it->title);%</a>
         %} else {%
-            [%INT(it->group_count);%] %ESCAPED_OUT(it->title, strlen(it->title));%
+            [%INT(it->group_count);%] %ESCAPED(it->title);%
         %}%
         </li>
     %}%
@@ -21,7 +21,7 @@
 <ul>
 %if (reminders.count > 0) {%
     %for (size_t i = 0; i < reminders.count; ++i) {%
-      <li>%ESCAPED_OUT(reminders.items[i].title, strlen(reminders.items[i].title));%</li>
+      <li>%ESCAPED(reminders.items[i].title);%</li>
     %}%
 %} else {%
     <p>No reminders</p>

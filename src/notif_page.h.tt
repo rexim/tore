@@ -1,8 +1,8 @@
 <h1>Tore - Notification - %INT(notif.id);%</h1>
-<h2>%ESCAPED_OUT(notif.title, strlen(notif.title));%</h2>
-<p>Created at %ESCAPED_OUT(notif.created_at, strlen(notif.created_at));%</p>
+<h2>%ESCAPED(notif.title);%</h2>
+<p>Created at %ESCAPED(notif.created_at);%</p>
 %if (notif.dismissed_at) {%
-    <p>Dismissed at %ESCAPED_OUT(notif.dismissed_at, strlen(notif.dismissed_at));%</p>
+    <p>Dismissed at %ESCAPED(notif.dismissed_at);%</p>
 %} else {%
     <p>Not dismissed yet</p>
 %}%

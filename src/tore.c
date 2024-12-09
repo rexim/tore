@@ -727,12 +727,10 @@ void sb_append_html_escaped_buf(String_Builder *sb, const char *buf, size_t size
     }
 }
 
-// TODO: Introduce OUT_CSTR and ESCAPED_OUT_CSTR template macro parameters
-
 void render_index_page(String_Builder *sb, Grouped_Notifications notifs, Reminders reminders)
 {
 #define OUT(buf, size) sb_append_buf(sb, buf, size);
-#define ESCAPED_OUT(buf, size) sb_append_html_escaped_buf(sb, buf, size);
+#define ESCAPED(cstr) sb_append_html_escaped_buf(sb, cstr, strlen(cstr));
 #define INT(x) sb_append_cstr(sb, temp_sprintf("%d", (x)));
 #define PAGE_BODY "index_page.h"
 #define PAGE_TITLE
@@ -740,7 +738,7 @@ void render_index_page(String_Builder *sb, Grouped_Notifications notifs, Reminde
 #undef PAGE_TITLE
 #undef PAGE_BODY
 #undef INT
-#undef ESCAPED_OUT
+#undef ESCAPED
 #undef OUT
 }
 
@@ -762,7 +760,7 @@ void render_error_page(String_Builder *sb, int error_code, const char *error_nam
 void render_notif_page(String_Builder *sb, Notification notif)
 {
 #define OUT(buf, size) sb_append_buf(sb, buf, size);
-#define ESCAPED_OUT(buf, size) sb_append_html_escaped_buf(sb, buf, size);
+#define ESCAPED(cstr) sb_append_html_escaped_buf(sb, cstr, strlen(cstr));
 #define INT(x) sb_append_cstr(sb, temp_sprintf("%d", (x)));
 #define PAGE_BODY "notif_page.h"
 #define PAGE_TITLE sb_append_cstr(sb, " - Notification - "); INT(notif.id);
@@ -771,18 +769,19 @@ void render_notif_page(String_Builder *sb, Notification notif)
 #undef PAGE_BODY
 #undef INT
 #undef OUT
-#undef ESCAPED_OUT
+#undef ESCAPED
 }
 
 void render_version_page(String_Builder *sb)
 {
 #define OUT(buf, size) sb_append_buf(sb, buf, size);
+#define ESCAPED(cstr) sb_append_html_escaped_buf(sb, cstr, strlen(cstr));
 #define PAGE_BODY "version_page.h"
 #define PAGE_TITLE sb_append_cstr(sb, " - "); sb_append_cstr(sb, GIT_HASH);
 #include "root_page.h"
 #undef PAGE_TITLE
 #undef PAGE_BODY
-#undef ESCAPED_OUT
+#undef ESCAPED
 #undef OUT
 }
 
