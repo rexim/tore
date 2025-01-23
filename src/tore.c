@@ -1129,7 +1129,7 @@ void serve_resource(Serve_Context *sc, const char *resource_path, const char *co
 void serve_request(Serve_Context *sc)
 {
     // TODO: should `serve` fire off reminders?
-    // TODO: log queries
+    // TODO: log HTTP queries
 
     // <Status-Line>\r\n<Header>\r\n<Header>\r\n<Header>\r\n<Header>\r\n<Header>\r\n\r\n
     char buffer[1024];
@@ -1439,6 +1439,15 @@ defer:
 
 bool help_run(Command *self, const char *program_name, int argc, char **argv);
 
+// TODO: more consistent naming of the commands
+// Right now we have a problem that it's unclear what object the command manipulating: Notification or Reminder.
+// The naming should reflect that somehow. Maybe even introduce nested commands:
+// - tore remind add    ...
+// - tore remind rm     ...
+// - tore notifi add    ...
+// - tore notifi rm     ...
+// - tore notifi remind ... // promotes Notification to Reminder
+// - ...
 static Command commands[] = {
     {
         .name = "checkout",
