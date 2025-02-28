@@ -1,4 +1,4 @@
-/* nob - v1.10.0-dev - Public Domain - https://github.com/tsoding/nob
+/* nob - v1.14.0 - Public Domain - https://github.com/tsoding/nob.h
 
    This library is the next generation of the [NoBuild](https://github.com/tsoding/nobuild) idea.
 
@@ -91,9 +91,9 @@
       // Opening all the necessary files
       Nob_Fd fdin = nob_fd_open_for_read("input.txt");
       if (fdin == NOB_INVALID_FD) return 1;
-      Nob_Fd fdout = nob_fd_open_for_read("output.txt");
+      Nob_Fd fdout = nob_fd_open_for_write("output.txt");
       if (fdout == NOB_INVALID_FD) return 1;
-      Nob_Fd fderr = nob_fd_open_for_read("error.txt");
+      Nob_Fd fderr = nob_fd_open_for_write("error.txt");
       if (fderr == NOB_INVALID_FD) return 1;
 
       // Preparing the command
@@ -164,11 +164,21 @@
 #ifndef NOB_H_
 #define NOB_H_
 
-#define NOB_ASSERT assert
-#define NOB_REALLOC realloc
-#define NOB_FREE free
-
+#ifndef NOB_ASSERT
 #include <assert.h>
+#define NOB_ASSERT assert
+#endif /* NOB_ASSERT */
+
+#ifndef NOB_REALLOC
+#include <stdlib.h>
+#define NOB_REALLOC realloc
+#endif /* NOB_REALLOC */
+
+#ifndef NOB_FREE
+#include <stdlib.h>
+#define NOB_FREE free
+#endif /* NOB_FREE */
+
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -288,6 +298,24 @@ bool nob_delete_file(const char *path);
         memcpy((da)->items + (da)->count, (new_items), (new_items_count)*sizeof(*(da)->items)); \
         (da)->count += (new_items_count);                                                     \
     } while (0)
+
+#define nob_da_resize(da, new_size)                                                        \
+    do {                                                                                   \
+        if ((new_size) > (da)->capacity) {                                                 \
+            (da)->capacity = (new_size);                                                   \
+            (da)->items = NOB_REALLOC((da)->items, (da)->capacity * sizeof(*(da)->items)); \
+            NOB_ASSERT((da)->items != NULL && "Buy more RAM lol");                         \
+        }                                                                                  \
+        (da)->count = (new_size);                                                          \
+    } while (0)
+
+#define nob_da_last(da) (da)->items[(NOB_ASSERT((da)->count > 0), (da)->count-1)]
+#define nob_da_remove_unordered(da, i)               \
+    do {                                             \
+        size_t j = (i);                              \
+        NOB_ASSERT(j < (da)->count);                 \
+        (da)->items[j] = (da)->items[--(da)->count]; \
+    } while(0)
 
 typedef struct {
     char *items;
@@ -430,20 +458,15 @@ bool nob_set_current_dir(const char *path);
 #ifndef NOB_REBUILD_URSELF
 #  if _WIN32
 #    if defined(__GNUC__)
-#       define NOB_REBUILD_URSELF(binary_path, source_path) "gcc", "-DNOB_SELF_REBUILT", "-o", binary_path, source_path
+#       define NOB_REBUILD_URSELF(binary_path, source_path) "gcc", "-o", binary_path, source_path
 #    elif defined(__clang__)
-#       define NOB_REBUILD_URSELF(binary_path, source_path) "clang", "-DNOB_SELF_REBUILT", "-o", binary_path, source_path
+#       define NOB_REBUILD_URSELF(binary_path, source_path) "clang", "-o", binary_path, source_path
 #    elif defined(_MSC_VER)
-#       define NOB_REBUILD_URSELF(binary_path, source_path) "cl.exe", "/DNOB_SELF_REBUILT", nob_temp_sprintf("/Fe:%s", (binary_path)), source_path
+#       define NOB_REBUILD_URSELF(binary_path, source_path) "cl.exe", nob_temp_sprintf("/Fe:%s", (binary_path)), source_path
 #    endif
 #  else
-#    define NOB_REBUILD_URSELF(binary_path, source_path) "cc", "-DNOB_SELF_REBUILT", "-o", binary_path, source_path
+#    define NOB_REBUILD_URSELF(binary_path, source_path) "cc", "-o", binary_path, source_path
 #  endif
-// TODO: After the introduction of -DNOB_SELF_REBUILT all the custom NOB_REBUILD_URSELF definitions are broken,
-// because they likely don't have it. And if you don't have -DNOB_SELF_REBUILT you end up in an infinite rebuild loop.
-// We should probably put -DNOB_SELF_REBUILT into a separate macro (also redefinable for those who know what they are doing).
-// Luckly just "-DNOB_SELF_REBUILT" should work for the majority of the compilers (including MSVC btw, because it allows to
-// use both dashes and slashes for its flags).
 #endif
 
 // Go Rebuild Urself™ Technology
@@ -640,13 +663,8 @@ void nob__go_rebuild_urself(int argc, char **argv, const char *source_path, ...)
     }
 #endif
 
-    // TODO: write an article about how to use the flags files.
-    const char *nob_flags_file_path = nob_temp_sprintf("%s.flags.txt", binary_path);
-    int nob_flags_exists = nob_file_exists(nob_flags_file_path);
-
     Nob_File_Paths source_paths = {0};
     nob_da_append(&source_paths, source_path);
-    if (nob_flags_exists > 0) nob_da_append(&source_paths, nob_flags_file_path);
     va_list args;
     va_start(args, source_path);
     for (;;) {
@@ -658,14 +676,8 @@ void nob__go_rebuild_urself(int argc, char **argv, const char *source_path, ...)
 
     int rebuild_is_needed = nob_needs_rebuild(binary_path, source_paths.items, source_paths.count);
     if (rebuild_is_needed < 0) exit(1); // error
-#ifndef NOB_SELF_REBUILT
-    // If NOB_SELF_REBUILT is not defined we are running nob that was bootstrapped manually
-    // for the first time. Which means it probably does not have flags defined in nob.flags.txt
-    // files. Forsing rebuild just in case to pick up those flags.
-    rebuild_is_needed = 1;
-#endif //
     if (!rebuild_is_needed) {           // no rebuild is needed
-        free(source_paths.items);
+        NOB_FREE(source_paths.items);
         return;
     }
 
@@ -675,29 +687,10 @@ void nob__go_rebuild_urself(int argc, char **argv, const char *source_path, ...)
 
     if (!nob_rename(binary_path, old_binary_path)) exit(1);
     nob_cmd_append(&cmd, NOB_REBUILD_URSELF(binary_path, source_path));
-    if (nob_flags_exists > 0) {
-        Nob_String_Builder sb = {0};
-        if (nob_read_entire_file(nob_flags_file_path, &sb)) {
-            Nob_String_View sv = nob_sb_to_sv(sb);
-            while (sv.count > 0) {
-                Nob_String_View flag = nob_sv_trim(nob_sv_chop_by_delim(&sv, '\n'));
-                if (flag.count == 0) continue;         // NOTE: ignore empty lines
-                if (*flag.data == '#') continue;       // NOTE: ignore commented out lines
-                ((char*)flag.data)[flag.count] = '\0'; // TODO: explain why this is fine
-                nob_cmd_append(&cmd, flag.data);
-            }
-        }
-    }
     if (!nob_cmd_run_sync_and_reset(&cmd)) {
         nob_rename(old_binary_path, binary_path);
         exit(1);
     }
-#ifdef NOB_GRU_DELETE_OLD_BINARY
-    // TODO: this is an experimental behavior behind a compilation flag.
-    // Once it is confirmed that it does not cause much problems on both POSIX and Windows
-    // we may turn it on by default.
-    nob_delete_file(old_binary_path);
-#endif // NOB_GRU_DELETE_OLD_BINARY
 
     nob_cmd_append(&cmd, binary_path);
     nob_da_append_many(&cmd, argv, argc);
@@ -783,7 +776,7 @@ bool nob_copy_file(const char *src_path, const char *dst_path)
     }
 
 defer:
-    free(buf);
+    NOB_FREE(buf);
     close(src_fd);
     close(dst_fd);
     return result;
@@ -1241,13 +1234,13 @@ bool nob_delete_file(const char *path)
     nob_log(NOB_INFO, "deleting %s", path);
 #ifdef _WIN32
     if (!DeleteFileA(path)) {
-        nob_log(NOB_ERROR, "Could not delete file %s: %s", nob_win32_error_message(GetLastError()));
+        nob_log(NOB_ERROR, "Could not delete file %s: %s", path, nob_win32_error_message(GetLastError()));
         return false;
     }
     return true;
 #else
     if (remove(path) < 0) {
-        nob_log(NOB_ERROR, "Could not delete file %s: %s", strerror(errno));
+        nob_log(NOB_ERROR, "Could not delete file %s: %s", path, strerror(errno));
         return false;
     }
     return true;
@@ -1494,7 +1487,7 @@ bool nob_read_entire_file(const char *path, Nob_String_Builder *sb)
 
     size_t new_count = sb->count + m;
     if (new_count > sb->capacity) {
-        sb->items = realloc(sb->items, new_count);
+        sb->items = NOB_REALLOC(sb->items, new_count);
         NOB_ASSERT(sb->items != NULL && "Buy more RAM lool!!");
         sb->capacity = new_count;
     }
@@ -1622,7 +1615,7 @@ int nob_file_exists(const char *file_path)
 #endif
 }
 
-const char *nob_get_current_dir_temp()
+const char *nob_get_current_dir_temp(void)
 {
 #ifdef _WIN32
     DWORD nBufferLength = GetCurrentDirectory(0, NULL);
@@ -1677,12 +1670,13 @@ struct DIR
 
 DIR *opendir(const char *dirpath)
 {
-    assert(dirpath);
+    NOB_ASSERT(dirpath);
 
     char buffer[MAX_PATH];
     snprintf(buffer, MAX_PATH, "%s\\*", dirpath);
 
-    DIR *dir = (DIR*)calloc(1, sizeof(DIR));
+    DIR *dir = (DIR*)NOB_REALLOC(NULL, sizeof(DIR));
+    memset(dir, 0, sizeof(DIR));
 
     dir->hFind = FindFirstFile(buffer, &dir->data);
     if (dir->hFind == INVALID_HANDLE_VALUE) {
@@ -1696,7 +1690,7 @@ DIR *opendir(const char *dirpath)
 
 fail:
     if (dir) {
-        free(dir);
+        NOB_FREE(dir);
     }
 
     return NULL;
@@ -1704,10 +1698,11 @@ fail:
 
 struct dirent *readdir(DIR *dirp)
 {
-    assert(dirp);
+    NOB_ASSERT(dirp);
 
     if (dirp->dirent == NULL) {
-        dirp->dirent = (struct dirent*)calloc(1, sizeof(struct dirent));
+        dirp->dirent = (struct dirent*)NOB_REALLOC(NULL, sizeof(struct dirent));
+        memset(dirp->dirent, 0, sizeof(struct dirent));
     } else {
         if(!FindNextFile(dirp->hFind, &dirp->data)) {
             if (GetLastError() != ERROR_NO_MORE_FILES) {
@@ -1732,7 +1727,7 @@ struct dirent *readdir(DIR *dirp)
 
 int closedir(DIR *dirp)
 {
-    assert(dirp);
+    NOB_ASSERT(dirp);
 
     if(!FindClose(dirp->hFind)) {
         // TODO: closedir should set errno accordingly on FindClose fail
@@ -1742,9 +1737,9 @@ int closedir(DIR *dirp)
     }
 
     if (dirp->dirent) {
-        free(dirp->dirent);
+        NOB_FREE(dirp->dirent);
     }
-    free(dirp);
+    NOB_FREE(dirp);
 
     return 0;
 }
@@ -1795,6 +1790,9 @@ int closedir(DIR *dirp)
         #define da_append nob_da_append
         #define da_free nob_da_free
         #define da_append_many nob_da_append_many
+        #define da_resize nob_da_resize
+        #define da_last nob_da_last
+        #define da_remove_unordered nob_da_remove_unordered
         #define String_Builder Nob_String_Builder
         #define read_entire_file nob_read_entire_file
         #define sb_append_buf nob_sb_append_buf
@@ -1858,11 +1856,15 @@ int closedir(DIR *dirp)
 /*
    Revision history:
 
-      1.10.0-dev         Add NOB_GO_REBUILD_URSELF_PLUS()
-                         Add nob_delete_file()
-                         Add experimental NOB_GRU_DELETE_OLD_BINARY feature flag
-                         Add nob.flags.txt file awareness
+     1.14.0 (2025-02-17) Add nob_da_last()
+                         Add nob_da_remove_unordered()
+     1.13.1 (2025-02-17) Fix segfault in nob_delete_file() (By @SileNce5k)
+     1.13.0 (2025-02-11) Add nob_da_resize() (By @satchelfrost)
+     1.12.0 (2025-02-04) Add nob_delete_file()
                          Add nob_sv_start_with()
+     1.11.0 (2025-02-04) Add NOB_GO_REBUILD_URSELF_PLUS() (By @rexim)
+     1.10.0 (2025-02-04) Make NOB_ASSERT, NOB_REALLOC, and NOB_FREE redefinable (By @OleksiiBulba)
+      1.9.1 (2025-02-04) Fix signature of nob_get_current_dir_temp() (By @julianstoerig)
       1.9.0 (2024-11-06) Add Nob_Cmd_Redirect mechanism (By @rexim)
                          Add nob_path_name() (By @0dminnimda)
       1.8.0 (2024-11-03) Add nob_cmd_extend() (By @0dminnimda)
