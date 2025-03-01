@@ -74,6 +74,7 @@ bool set_environment_variable(const char *name, const char *value)
     return true;
 }
 
+// TODO: mark "dirty" hash with "+" symbol similar to how meson does it
 char *get_git_hash(Cmd *cmd)
 {
     char *result = NULL;
