@@ -1368,17 +1368,39 @@ defer:
     return result;
 }
 
+bool remi_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    UNUSED(self);
+    UNUSED(program_name);
+    UNUSED(argc);
+    UNUSED(argv);
+
+    bool result = true;
+    sqlite3 *db = NULL;
+
+    db = open_tore_db();
+    if (!db) return_defer(false);
+    if (!txn_begin(db)) return_defer(false);
+    if (!show_active_reminders(db)) return_defer(false);
+
+defer:
+    if (db) {
+        if (result) result = txn_commit(db);
+        sqlite3_close(db);
+    }
+    return result;
+}
+
 bool remi_new_run(Command *self, const char *program_name, int argc, char **argv)
 {
     bool result = true;
     sqlite3 *db = NULL;
 
     if (argc <= 0) {
-        db = open_tore_db();
-        if (!db) return_defer(false);
-        if (!txn_begin(db)) return_defer(false);
-        if (!show_active_reminders(db)) return_defer(false);
-        return_defer(true);
+        fprintf(stderr, "Usage:\n");
+        command_describe(*self, program_name, 2, DESCRIPTION_SHORT);
+        fprintf(stderr, "ERROR: expected title\n");
+        return_defer(false);
     }
 
     const char *title = shift(argv, argc);
@@ -1393,7 +1415,7 @@ bool remi_new_run(Command *self, const char *program_name, int argc, char **argv
     // TODO: research if it's possible to enforce the date format on the level of sqlite3 contraints
     const char *scheduled_at = shift(argv, argc);
     if (!verify_date_format(scheduled_at)) {
-        fprintf(stderr, "ERROR: %s is not a valid date format\n", scheduled_at);
+        fprintf(stderr, "ERROR: %s is not a valid date format. Expected (YYYY-MM-DD).\n", scheduled_at);
         return_defer(false);
     }
 
@@ -1498,11 +1520,15 @@ static Command commands[] = {
             "To view the exact Notifications in the collapsed Group you can use this command.",
         .run = noti_expand_run,
     },
-    // TODO: split remi:new and remi that just lists the reminders
+    {
+        .name = "remi",
+        .description = "Show a list of all active Reminders",
+        .run = remi_run,
+    },
     {
         .name = "remi:new",
-        .signature = "[<title> <scheduled_at> [period]]",
-        .description = "Schedule a reminder",
+        .signature = "<title> <scheduled_at> [period]",
+        .description = "Schedule a new reminder",
         .run = remi_new_run,
     },
     {
