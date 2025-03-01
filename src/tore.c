@@ -278,7 +278,7 @@ defer:
 }
 
 typedef struct {
-    int notif_id;            // The idea of a Singleton Notification in the Group. Does not make much sense if group_count > 0. In that case it's probably the id of the first one, but I wouldn't count on that
+    int notif_id;            // The id of a "Singleton" Notification in the Group. It does not make much sense if group_count > 0. In that case it's probably the id of the first one, but I wouldn't count on that
     const char *title;       // TODO: maybe in case of group_id > 0 the title should be the title of the corresponding reminder?
     const char *created_at;  // TODO: maybe in case of group_id > 0 the created_at should be the created_at of the latest notification?
     int reminder_id;
@@ -1285,6 +1285,29 @@ defer:
     return result;
 }
 
+bool noti_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    UNUSED(self);
+    UNUSED(program_name);
+    UNUSED(argc);
+    UNUSED(argv);
+
+    bool result = true;
+    sqlite3 *db = NULL;
+
+    db = open_tore_db();
+    if (!db) return_defer(false);
+    if (!txn_begin(db)) return_defer(false);
+    if (!show_active_notifications(db)) return_defer(false);
+
+defer:
+    if (db) {
+        if (result) result = txn_commit(db);
+        sqlite3_close(db);
+    }
+    return result;
+}
+
 bool noti_new_run(Command *self, const char *program_name, int argc, char **argv)
 {
     bool result = true;
@@ -1447,7 +1470,11 @@ static Command commands[] = {
             "This is a default command that is executed when you just call Tore by itself.",
         .run = checkout_run,
     },
-    // TODO: introduce just `noti` that lists notifications but does not fire them off
+    {
+        .name = "noti",
+        .description = "Show the list of current Notifications, but unlike `checkout` do not fire them off.",
+        .run = noti_run,
+    },
     {
         .name = "noti:new",
         .signature = "<title...>",
