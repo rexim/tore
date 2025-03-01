@@ -1285,7 +1285,7 @@ defer:
     return result;
 }
 
-bool noti_run(Command *self, const char *program_name, int argc, char **argv)
+bool noti_list_run(Command *self, const char *program_name, int argc, char **argv)
 {
     UNUSED(self);
     UNUSED(program_name);
@@ -1368,7 +1368,7 @@ defer:
     return result;
 }
 
-bool remi_run(Command *self, const char *program_name, int argc, char **argv)
+bool remi_list_run(Command *self, const char *program_name, int argc, char **argv)
 {
     UNUSED(self);
     UNUSED(program_name);
@@ -1493,9 +1493,9 @@ static Command commands[] = {
         .run = checkout_run,
     },
     {
-        .name = "noti",
+        .name = "noti:list",
         .description = "Show the list of current Notifications, but unlike `checkout` do not fire them off.",
-        .run = noti_run,
+        .run = noti_list_run,
     },
     {
         .name = "noti:new",
@@ -1521,9 +1521,9 @@ static Command commands[] = {
         .run = noti_expand_run,
     },
     {
-        .name = "remi",
+        .name = "remi:list",
         .description = "Show a list of all active Reminders",
-        .run = remi_run,
+        .run = remi_list_run,
     },
     {
         .name = "remi:new",
