@@ -522,7 +522,7 @@ defer:
 }
 
 typedef enum {
-    PERIOD_NONE = -1,
+    PERIOD_NONE,
     PERIOD_DAY,
     PERIOD_WEEK,
     PERIOD_MONTH,
@@ -535,7 +535,7 @@ typedef struct {
     const char *name;
 } Period_Modifier;
 
-static_assert(COUNT_PERIODS == 4, "Amount of periods have changed");
+static_assert(COUNT_PERIODS == 5, "Amount of periods have changed");
 Period_Modifier tore_period_modifiers[COUNT_PERIODS] = {
     [PERIOD_DAY]   = { .modifier = "d", .name = "days"   },
     [PERIOD_WEEK]  = { .modifier = "w", .name = "weeks"  },
@@ -546,9 +546,8 @@ Period_Modifier tore_period_modifiers[COUNT_PERIODS] = {
 Period period_by_tore_modifier(const char *modifier)
 {
     for (Period period = 0; period < COUNT_PERIODS; ++period) {
-        if (strcmp(modifier, tore_period_modifiers[period].modifier) == 0) {
-            return period;
-        }
+        Period_Modifier *pm = &tore_period_modifiers[period];
+        if (pm->modifier != NULL && strcmp(modifier, pm->modifier) == 0) return period;
     }
     return PERIOD_NONE;
 }
@@ -1429,8 +1428,10 @@ bool remi_new_run(Command *self, const char *program_name, int argc, char **argv
             fprintf(stderr, "ERROR: Invalid period `%s`. Expected something like\n", unparsed_period);
             for (Period p = 0; p < COUNT_PERIODS; ++p) {
                 Period_Modifier *pm = &tore_period_modifiers[p];
-                size_t l = rand()%9 + 1;
-                fprintf(stderr, "    %lu%s - means every %lu %s\n", l, pm->modifier, l, pm->name);
+                if (pm->modifier) {
+                    size_t l = rand()%9 + 1;
+                    fprintf(stderr, "    %lu%s - means every %lu %s\n", l, pm->modifier, l, pm->name);
+                }
             }
             return_defer(false);
         }
@@ -1440,7 +1441,9 @@ bool remi_new_run(Command *self, const char *program_name, int argc, char **argv
             fprintf(stderr, "ERROR: Unknown period modifier `%s`. Expected modifiers are\n", unparsed_period);
             for (Period p = 0; p < COUNT_PERIODS; ++p) {
                 Period_Modifier *pm = &tore_period_modifiers[p];
-                fprintf(stderr, "    %lu%s  - means every %lu %s\n", period_length, pm->modifier, period_length, pm->name);
+                if (pm->modifier) {
+                    fprintf(stderr, "    %lu%s  - means every %lu %s\n", period_length, pm->modifier, period_length, pm->name);
+                }
             }
             return_defer(false);
         }
