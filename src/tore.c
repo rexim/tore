@@ -716,6 +716,46 @@ defer:
     return result;
 }
 
+bool amend_reminder(sqlite3 *db, Reminder reminder)
+{
+    bool result = true;
+
+    sqlite3_stmt *stmt = NULL;
+
+    int ret = sqlite3_prepare_v2(db, "UPDATE Reminders SET title = ?, scheduled_at = ?, period = ? WHERE id = ?", -1, &stmt, NULL);
+    if (ret != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+
+    int column = 0;
+    if (sqlite3_bind_text(stmt, ++column, reminder.title, strlen(reminder.title), NULL) != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+    if (sqlite3_bind_text(stmt, ++column, reminder.scheduled_at, strlen(reminder.scheduled_at), NULL) != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+    if (sqlite3_bind_text(stmt, ++column, reminder.period, reminder.period ? strlen(reminder.period) : 0, NULL) != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+    if (sqlite3_bind_int(stmt, ++column, reminder.id) != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+
+defer:
+    if (stmt) sqlite3_finalize(stmt);
+    return result;
+}
+
 bool remove_reminder_by_number(sqlite3 *db, int number)
 {
     bool result = true;
@@ -1437,6 +1477,95 @@ defer:
     return result;
 }
 
+bool remi_amend_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    bool result = true;
+    sqlite3 *db = NULL;
+    Reminders reminders = {0};
+
+    if (argc <= 0) {
+        fprintf(stderr, "Usage:\n");
+        command_describe(*self, program_name, 2, DESCRIPTION_SHORT);
+        fprintf(stderr, "ERROR: expected index\n");
+        return_defer(false);
+    }
+    int index = atoi(shift(argv, argc));
+
+    const char *title = NULL;
+    const char *scheduled_at = NULL;
+    bool amend_period = false;
+    Period period = {0};
+
+    while (argc > 0) {
+        const char *flag = shift(argv, argc);
+        if (strcmp(flag, "-title") == 0) {
+            if (argc <= 0) {
+                fprintf(stderr, "Usage:\n");
+                command_describe(*self, program_name, 2, DESCRIPTION_SHORT);
+                fprintf(stderr, "ERROR: no argument is provided for `%s`\n", flag);
+                return_defer(false);
+            }
+            title = shift(argv, argc);
+        } else if (strcmp(flag, "-scheduled-at") == 0) {
+            if (argc <= 0) {
+                fprintf(stderr, "Usage:\n");
+                command_describe(*self, program_name, 2, DESCRIPTION_SHORT);
+                fprintf(stderr, "ERROR: no argument is provided for `%s`\n", flag);
+                return_defer(false);
+            }
+            scheduled_at = verify_date_format(shift(argv, argc));
+            if (scheduled_at == NULL) return_defer(false);
+        } else if (strcmp(flag, "-period") == 0) {
+            if (argc <= 0) {
+                fprintf(stderr, "Usage:\n");
+                command_describe(*self, program_name, 2, DESCRIPTION_SHORT);
+                fprintf(stderr, "ERROR: no argument is provided for `%s`\n", flag);
+                return_defer(false);
+            }
+            amend_period = true;
+            if (!parse_period_from_cstr(shift(argv, argc), &period)) return_defer(false);
+        } else {
+            fprintf(stderr, "Usage:\n");
+            command_describe(*self, program_name, 2, DESCRIPTION_SHORT);
+            fprintf(stderr, "ERROR: unknown flag `%s`\n", flag);
+            return_defer(false);
+        }
+    }
+
+    db = open_tore_db();
+    if (!db) return_defer(false);
+    if (!txn_begin(db)) return_defer(false);
+
+    if (title == NULL && scheduled_at == NULL && !amend_period) {
+        fprintf(stderr, "Usage:\n");
+        command_describe(*self, program_name, 2, DESCRIPTION_SHORT);
+        fprintf(stderr, "ERROR: no properties were provided to amend\n");
+        return_defer(false);
+    }
+
+    if (!load_active_reminders(db, &reminders)) return_defer(false);
+    if (!(0 <= index && (size_t)index < reminders.count)) {
+        fprintf(stderr, "ERROR: %d is not a valid index of a reminder\n", index);
+        return_defer(false);
+    }
+
+    Reminder reminder = reminders.items[index];
+
+    if (title) reminder.title = title;
+    if (scheduled_at) reminder.scheduled_at = scheduled_at;
+    if (amend_period) reminder.period = render_period_as_sqlite3_datetime_modifier_temp(period);
+    if (!amend_reminder(db, reminder)) return_defer(false);
+    if (!show_active_reminders(db)) return_defer(false);
+
+defer:
+    if (db) {
+        if (result) result = txn_commit(db);
+        sqlite3_close(db);
+    }
+    free(reminders.items);
+    return result;
+}
+
 bool remi_new_run(Command *self, const char *program_name, int argc, char **argv)
 {
     bool result = true;
@@ -1557,6 +1686,12 @@ static Command commands[] = {
         .signature = "<index>",
         .description = "Remove a reminder by index",
         .run = remi_dismiss_run,
+    },
+    {
+        .name = "remi:amend",
+        .signature = "<index> [-title <title>] [-scheduled-at <scheduled_at>] [-period <period>]",
+        .description = "Amend properties of an existing Reminder by its index in the remi:list.",
+        .run = remi_amend_run,
     },
     {
         .name = "serve",
