@@ -733,18 +733,29 @@ defer:
     return result;
 }
 
-bool verify_date_format(const char *date)
+bool matches_format(const char *input, const char *format)
 {
     // Who needs Regular Expressions?
-    const char *format = "dddd-dd-dd";
-    for (; *format && *date; format++, date++) {
+    for (; *format && *input; format++, input++) {
         switch (*format) {
-            case 'd': if (!isdigit(*date)) return false; break;
-            case '-': if (*date != '-')    return false; break;
-            default:  UNREACHABLE("verify_date_format");
+            case 'd': if (!isdigit(*input)) return false; break;
+            case '-': if (*input != '-')    return false; break;
+            default:  UNREACHABLE("matches_format");
         }
     }
-    return !(*format || *date);
+    if (*format || *input) return false;
+    return true;
+}
+
+// TODO: Allow the scheduled_at to be things like "today", "tomorrow", etc
+// TODO: research if it's possible to enforce the date format on the level of sqlite3 contraints
+const char *verify_date_format(const char *date)
+{
+    if (!matches_format(date, "dddd-dd-dd")) {
+        fprintf(stderr, "ERROR: %s is not a valid date format. Expected (YYYY-MM-DD).\n", date);
+        return NULL;
+    }
+    return date;
 }
 
 // Taken from https://stackoverflow.com/a/7382028
@@ -1389,10 +1400,10 @@ bool remi_dismiss_run(Command *self, const char *program_name, int argc, char **
         fprintf(stderr, "ERROR: expected index\n");
         return_defer(false);
     }
+    int number = atoi(shift(argv, argc));
     db = open_tore_db();
     if (!db) return_defer(false);
     if (!txn_begin(db)) return_defer(false);
-    int number = atoi(shift(argv, argc));
     if (!remove_reminder_by_number(db, number)) return_defer(false);
     if (!show_active_reminders(db)) return_defer(false);
 defer:
@@ -1446,13 +1457,8 @@ bool remi_new_run(Command *self, const char *program_name, int argc, char **argv
         return_defer(false);
     }
 
-    // TODO: Allow the scheduled_at to be things like "today", "tomorrow", etc
-    // TODO: research if it's possible to enforce the date format on the level of sqlite3 contraints
-    const char *scheduled_at = shift(argv, argc);
-    if (!verify_date_format(scheduled_at)) {
-        fprintf(stderr, "ERROR: %s is not a valid date format. Expected (YYYY-MM-DD).\n", scheduled_at);
-        return_defer(false);
-    }
+    const char *scheduled_at = verify_date_format(shift(argv, argc));
+    if (scheduled_at == NULL) return_defer(false);
 
     Period period = {0};
     if (argc > 0) {
