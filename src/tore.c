@@ -311,6 +311,8 @@ bool load_active_grouped_notifications(sqlite3 *db, Grouped_Notifications *notif
     //   SELECT id, title, datetime(created_at, 'localtime') FROM Notifications WHERE dismissed_at IS NULL GROUP BY ifnull(reminder_id, -id)
     //   ```
     //   Which is a working solution, but all the other problems UUIDs address remain.
+    // TODO: Also consider using Twitter Snowlakes ID instead of UUIDs
+    //   https://en.wikipedia.org/wiki/Snowflake_ID
 
     int ret = sqlite3_prepare_v2(db,
         "SELECT id, title, datetime(created_at, 'localtime') as ts, reminder_id, ifnull(reminder_id, -id) as group_id, count(*) as group_count "
