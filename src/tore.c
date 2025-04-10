@@ -299,7 +299,7 @@ bool load_active_grouped_notifications(sqlite3 *db, Grouped_Notifications *notif
 
     // TODO: Consider using UUIDs for identifying Notifications and Reminders
     //   Read something like https://www.cockroachlabs.com/blog/what-is-a-uuid/ for UUIDs in DBs 101
-    //   (There are lots of articles like these online, just google the topic up).
+    //   (There are lots of articles like these online, just google the topic up. RFC 9562 is also a good read).
     //   This is related to visually grouping non-dismissed Notifications created by the same Reminders purely in SQL.
     //   Doing it straightforwardly would be something like
     //   ```sql
