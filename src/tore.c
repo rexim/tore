@@ -680,9 +680,9 @@ bool show_active_reminders(sqlite3 *db)
     for (size_t i = 0; i < reminders.count; ++i) {
         Reminder *it = &reminders.items[i];
         if (it->period) {
-            fprintf(stderr, "%zu: %s (Scheduled at %s every %s)\n", i, it->title, it->scheduled_at, it->period);
+            printf("%zu: %s (Scheduled at %s every %s)\n", i, it->title, it->scheduled_at, it->period);
         } else {
-            fprintf(stderr, "%zu: %s (Scheduled at %s)\n", i, it->title, it->scheduled_at);
+            printf("%zu: %s (Scheduled at %s)\n", i, it->title, it->scheduled_at);
         }
     }
 
