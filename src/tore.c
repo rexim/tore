@@ -1788,3 +1788,4 @@ defer:
 // TODO: `undo` command
 // TODO: some way to turn Notification into a Reminder
 // TODO: calendar output with the reminders
+// TODO: interactive TUI mode for tore
