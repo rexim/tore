@@ -57,7 +57,7 @@ bool build_sqlite3(Nob_Cmd *cmd)
         cmd_append(cmd, "-DSQLITE_OMIT_LOAD_EXTENSION", "-O3", "-c");
         builder_output(cmd, output_path);
         builder_inputs(cmd, input_path);
-        if (!nob_cmd_run_sync_and_reset(cmd)) return false;
+        if (!nob_cmd_run(cmd)) return false;
     } else {
         nob_log(NOB_INFO, "%s is up to date", output_path);
     }
@@ -82,9 +82,7 @@ char *get_git_hash(Cmd *cmd)
     Fd fdout = fd_open_for_write(GIT_HASH_FILE);
     if (fdout == INVALID_FD) return_defer(NULL);
     cmd_append(cmd, "git", "rev-parse", "HEAD");
-    if (!cmd_run_sync_redirect_and_reset(cmd, (Nob_Cmd_Redirect) {
-        .fdout = &fdout
-    })) return_defer(NULL);
+    if (!cmd_run(cmd, .fdout = &fdout)) return_defer(NULL);
     if (!read_entire_file(GIT_HASH_FILE, &sb)) return_defer(NULL);
     while (sb.count > 0 && isspace(sb.items[sb.count - 1])) sb.count -= 1;
     sb_append_null(&sb);
@@ -106,9 +104,7 @@ bool compile_template(Cmd *cmd, const char *src_path, const char *dst_path)
     Fd index_fd = fd_open_for_write(dst_path);
     if (index_fd == INVALID_FD) return false;;
     cmd_append(cmd, BUILD_FOLDER"tt", src_path);
-    if (!cmd_run_sync_redirect_and_reset(cmd, (Nob_Cmd_Redirect) {
-        .fdout = &index_fd,
-    })) return false;;
+    if (!cmd_run(cmd, .fdout = &index_fd)) return false;;
     return true;
 }
 
@@ -211,7 +207,7 @@ bool build_tore(Cmd *cmd)
     builder_common_flags(cmd);
     builder_output(cmd, BUILD_FOLDER"tt");
     builder_inputs(cmd, SRC_BUILD_FOLDER"tt.c");
-    if (!cmd_run_sync_and_reset(cmd)) return false;
+    if (!cmd_run(cmd)) return false;
     for (size_t i = 0; i < ARRAY_LEN(page_templates); ++i) {
         if (!compile_template(cmd, page_templates[i].src_path, page_templates[i].dst_path)) {
             return false;
@@ -231,7 +227,7 @@ bool build_tore(Cmd *cmd)
     }
     builder_output(cmd, TORE_BIN_PATH);
     builder_inputs(cmd, SRC_FOLDER"tore.c", SQLITE3_OBJ_PATH);
-    if (!nob_cmd_run_sync_and_reset(cmd)) return false;
+    if (!nob_cmd_run(cmd)) return false;
 
     return true;
 }
@@ -272,7 +268,8 @@ int main(int argc, char **argv)
             nob_log(ERROR, "Watch mode is not supported on Windows yet");
             return 1;
 #else // _WIN32
-            Proc p = nob_cmd_run_async_and_reset(&cmd);
+            Proc p = nob_cmd_start_process(cmd, NULL, NULL, NULL);
+            cmd.count = 0;
             File_Paths tore_inputs = {0};
             // TODO: this is an extra place to modify if the dependencies have changed
             da_append(&tore_inputs, SRC_FOLDER"tore.c");
@@ -294,10 +291,11 @@ int main(int argc, char **argv)
                         kill(p, SIGINT); // TODO: we need a cross-platform nob_kill of some sort
                         cmd_append(&cmd, TORE_BIN_PATH);
                         da_append_many(&cmd, argv, argc);
-                        p = nob_cmd_run_async_and_reset(&cmd);
+                        p = nob_cmd_start_process(cmd, NULL, NULL, NULL);
+                        cmd.count = 0;
                     } else {
                         cmd_append(&cmd, "touch", TORE_BIN_PATH); // TODO: don't depend on external POSIX utils for "touching" the binary
-                        if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
+                        if (!nob_cmd_run(&cmd)) return 1;
                     }
                 }
                 // TODO: Use file watch mechanisms of the available Operating System
@@ -306,7 +304,7 @@ int main(int argc, char **argv)
             }
 #endif // _WIN32
         } else {
-            if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
+            if (!nob_cmd_run(&cmd)) return 1;
             return 0;
         }
     }
@@ -315,7 +313,7 @@ int main(int argc, char **argv)
         cmd_append(&cmd, "convert",
                 "-background", "None", "./assets/images/tore.svg",
                 "-resize", "32x32", "./assets/images/tore.png");
-        if (!cmd_run_sync_and_reset(&cmd)) return 1;
+        if (!cmd_run(&cmd)) return 1;
         return 0;
     }
 
