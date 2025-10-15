@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <termios.h>
 
 #define NOB_IMPLEMENTATION
 #define NOB_STRIP_PREFIX
@@ -903,7 +904,7 @@ defer:
 typedef struct Command {
     const char *name;
     const char *description;
-    const char *signature;
+    const char *signature;      // NULL means no signature
     bool (*run)(struct Command *self, const char *program_name, int argc, char **argv);
 } Command;
 
@@ -1634,6 +1635,191 @@ defer:
     return result;
 }
 
+bool tui_enable_raw_terminal_mode(struct termios *saved)
+{
+    // https://viewsourcecode.org/snaptoken/kilo/02.enteringRawMode.html
+    struct termios raw;
+    if (tcgetattr(STDOUT_FILENO, &raw) < 0) return false;
+    *saved = raw;
+    raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    raw.c_oflag &= ~(OPOST); // for newline processing
+    raw.c_cflag |= (CS8);
+    raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 1;
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) < 0) return false;
+    return true;
+}
+
+bool tui_disable_raw_terminal_mode(struct termios *saved)
+{
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, saved) < 0) return false;
+    return true;
+}
+
+void tui_cursor_up(size_t lines)
+{
+    dprintf(STDOUT_FILENO, "\x1b[%zuA", lines);
+}
+
+void tui_erase_until_bottom(void)
+{
+    dprintf(STDOUT_FILENO, "\x1b[0J");
+}
+
+size_t tui_grouped_notifications_selector(Grouped_Notifications *gns, size_t cursor, bool action_selector)
+{
+    tui_erase_until_bottom();
+    size_t lines_rendered = 0;
+    if (gns->count > 0) {
+        for (size_t i = 0; i < gns->count; ++i) {
+            Grouped_Notification *it = &gns->items[i];
+            assert(it->group_count > 0);
+            if (i == cursor) {
+                dprintf(STDOUT_FILENO, "=> ");
+            } else {
+                dprintf(STDOUT_FILENO, "   ");
+            }
+            if (it->group_count == 1) {
+                dprintf(STDOUT_FILENO, "%s (%s)", it->title, it->created_at);
+            } else {
+                dprintf(STDOUT_FILENO, "[%d] %s (%s)", it->group_count, it->title, it->created_at);
+            }
+            dprintf(STDOUT_FILENO, "\r\n");
+            lines_rendered += 1;
+            if (i == cursor) {
+                if (action_selector) {
+                    dprintf(STDOUT_FILENO, "      d - delete\r\n");
+                    lines_rendered += 1;
+                    dprintf(STDOUT_FILENO, "      q - cancel\r\n");
+                    lines_rendered += 1;
+                }
+            }
+        }
+    } else {
+        dprintf(STDOUT_FILENO, "  (no notifications)\r\n");
+        lines_rendered += 1;
+    }
+    return lines_rendered;
+}
+
+bool tui_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    UNUSED(self);
+    UNUSED(program_name);
+    UNUSED(argc);
+    UNUSED(argv);
+
+    bool result = true;
+    sqlite3 *db = NULL;
+    Grouped_Notifications gns = {0};
+    struct termios saved = {0};
+    bool raw_terminal_enabled = false;
+
+    if (!isatty(STDIN_FILENO)) {
+        fprintf(stderr, "ERROR: Not a tty! Please run this command in a proper terminal!\n");
+        return_defer(false);
+    }
+
+    if (!tui_enable_raw_terminal_mode(&saved)) return_defer(false);
+    raw_terminal_enabled = true;
+
+    db = open_tore_db();
+    if (!db) return_defer(false);
+    if (!txn_begin(db)) return_defer(false);
+    if (!load_active_grouped_notifications(db, &gns)) return_defer(false);
+
+    size_t cursor = gns.count > 0 ? gns.count - 1 : 0;
+
+    size_t lines_rendered = tui_grouped_notifications_selector(&gns, cursor, false);
+    enum {
+        TUI_STATE_SELECT,       // Selecting notification
+        TUI_STATE_ACTION,       // Picking an action on the notification
+    } state = TUI_STATE_SELECT;
+    size_t mark = temp_save();
+    while (1) {
+        temp_rewind(mark);
+        char c = '\0';
+        if (read(STDIN_FILENO, &c, 1) < 0 && errno != EAGAIN) {
+            fprintf(stderr, "ERROR: could not read user input: %s\n", strerror(errno));
+            return_defer(false);
+        }
+
+        switch (state) {
+        case TUI_STATE_SELECT: {
+            switch (c) {
+            // TODO: add support for arrow keys
+            case 'w': {
+                if (cursor > 0) cursor -= 1;
+                tui_cursor_up(lines_rendered);
+                lines_rendered = tui_grouped_notifications_selector(&gns, cursor, false);
+            } break;
+            case 's': {
+                if (cursor+1 < gns.count) cursor += 1;
+                tui_cursor_up(lines_rendered);
+                lines_rendered = tui_grouped_notifications_selector(&gns, cursor, false);
+            } break;
+            case 13:
+            case ' ': {
+                if (cursor < gns.count) {
+                    tui_cursor_up(lines_rendered);
+                    lines_rendered = tui_grouped_notifications_selector(&gns, cursor, true);
+                    state = TUI_STATE_ACTION;
+                }
+            } break;
+            case 27:
+            case 'q': goto over;
+            }
+        } break;
+        case TUI_STATE_ACTION: {
+            switch (c) {
+            case 'd': {
+                if (!dismiss_grouped_notification_by_group_id(db, gns.items[cursor].group_id)) {
+                    fprintf(stderr, "ERROR: dismiss_grouped_notification_by_group_id\n");
+                    return_defer(false);
+                }
+                tui_cursor_up(lines_rendered);
+                gns.count = 0;
+                if (!load_active_grouped_notifications(db, &gns)) {
+                    fprintf(stderr, "ERROR: load_active_grouped_notifications");
+                    return_defer(false);
+                }
+                if (cursor >= gns.count) {
+                    if (gns.count > 0) {
+                        cursor = gns.count - 1;
+                    } else {
+                        cursor = 0;
+                    }
+                }
+                lines_rendered = tui_grouped_notifications_selector(&gns, cursor, false);
+                state = TUI_STATE_SELECT;
+            } break;
+            case 27:
+            case 13:
+            case ' ':
+            case 'q': {
+                tui_cursor_up(lines_rendered);
+                lines_rendered = tui_grouped_notifications_selector(&gns, cursor, false);
+                state = TUI_STATE_SELECT;
+            } break;
+            }
+        } break;
+        default: UNREACHABLE("tui state");
+        }
+    } over:
+
+defer:
+    if (db) {
+        if (result) result = txn_commit(db);
+        sqlite3_close(db);
+    }
+    free(gns.items);
+    if (raw_terminal_enabled) {
+        tui_disable_raw_terminal_mode(&saved);
+    }
+    return result;
+}
+
 bool help_run(Command *self, const char *program_name, int argc, char **argv);
 
 static Command commands[] = {
@@ -1700,6 +1886,12 @@ static Command commands[] = {
         .signature = "[port]",
         .description = "Start up the Web Server. Default port is " STR(DEFAULT_SERVE_PORT) ".",
         .run = serve_run,
+    },
+    {
+        .name = "tui",
+        .signature = NULL,
+        .description = "Start tore in an interactive TUI mode",
+        .run = tui_run,
     },
     {
         .name = "help",
