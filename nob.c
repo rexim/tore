@@ -3,19 +3,19 @@
 #define NOB_EXPERIMENTAL_DELETE_OLD
 #include "nob.h"
 
+Procs procs = {0};
+
 #include "./src_build/flags.c"
 typedef enum {
     BF_FORCE,
     BF_ASAN,
-    BF_WATCH,
     BF_HELP,
     COUNT_BUILD_FLAGS
 } Build_Flag_Index;
-static_assert(COUNT_BUILD_FLAGS == 4, "Amount of build flags has changed");
+static_assert(COUNT_BUILD_FLAGS == 3, "Amount of build flags has changed");
 static Flag build_flags[COUNT_BUILD_FLAGS] = {
     [BF_FORCE] = {.name = "-f",     .description = "Force full rebuild"},
     [BF_ASAN]  = {.name = "-asan",  .description = "Enable address sanitizer"},
-    [BF_WATCH] = {.name = "-watch", .description = "Run process in watch mode and rebuild on any source code changes. Only works for `run` command."},
     [BF_HELP]  = {.name = "-h",     .description = "Print build flags"},
 };
 
@@ -79,10 +79,8 @@ char *get_git_hash(Cmd *cmd)
 {
     char *result = NULL;
     String_Builder sb = {0};
-    Fd fdout = fd_open_for_write(GIT_HASH_FILE);
-    if (fdout == INVALID_FD) return_defer(NULL);
     cmd_append(cmd, "git", "rev-parse", "HEAD");
-    if (!cmd_run(cmd, .fdout = &fdout)) return_defer(NULL);
+    if (!cmd_run(cmd, .stdout_path = GIT_HASH_FILE)) return_defer(NULL);
     if (!read_entire_file(GIT_HASH_FILE, &sb)) return_defer(NULL);
     while (sb.count > 0 && isspace(sb.items[sb.count - 1])) sb.count -= 1;
     sb_append_null(&sb);
@@ -101,10 +99,8 @@ void usage(const char *program_name)
 
 bool compile_template(Cmd *cmd, const char *src_path, const char *dst_path)
 {
-    Fd index_fd = fd_open_for_write(dst_path);
-    if (index_fd == INVALID_FD) return false;;
     cmd_append(cmd, BUILD_FOLDER"tt", src_path);
-    if (!cmd_run(cmd, .fdout = &index_fd)) return false;;
+    if (!cmd_run(cmd, .stdout_path = dst_path)) return false;;
     return true;
 }
 
@@ -122,6 +118,11 @@ struct {
 #define genf(out, ...) \
     do { \
         fprintf((out), __VA_ARGS__); \
+        fprintf((out), " // %s:%d\n", __FILE__, __LINE__); \
+    } while(0)
+#define gen_line(out) \
+    do { \
+        fprintf((out), "\n"); \
         fprintf((out), " // %s:%d\n", __FILE__, __LINE__); \
     } while(0)
 
@@ -177,7 +178,7 @@ bool generate_resource_bundle(void)
         for (size_t col = 0; col < row_size && i < bundle.count; ++col, ++i) {
             fprintf(out, "0x%02X, ", (unsigned char)bundle.items[i]);
         }
-        genf(out, "");
+        gen_line(out);
     }
     genf(out, "};");
     genf(out, "#endif // BUNDLE_H_");
@@ -263,50 +264,8 @@ int main(int argc, char **argv)
         if (!set_environment_variable("TORE_TRACE_MIGRATION_QUERIES", "1")) return 1;
         cmd_append(&cmd, TORE_BIN_PATH);
         da_append_many(&cmd, argv, argc);
-        if (build_flags[BF_WATCH].value) {
-#ifdef _WIN32
-            nob_log(ERROR, "Watch mode is not supported on Windows yet");
-            return 1;
-#else // _WIN32
-            Proc p = nob_cmd_start_process(cmd, NULL, NULL, NULL);
-            cmd.count = 0;
-            File_Paths tore_inputs = {0};
-            // TODO: this is an extra place to modify if the dependencies have changed
-            da_append(&tore_inputs, SRC_FOLDER"tore.c");
-            da_append(&tore_inputs, SQLITE3_OBJ_PATH);
-            for (size_t i = 0; i < ARRAY_LEN(page_templates); ++i) {
-                da_append(&tore_inputs, page_templates[i].src_path);
-            }
-            for (size_t i = 0; i < ARRAY_LEN(resources); ++i) {
-                da_append(&tore_inputs, resources[i].file_path);
-            }
-            for (;;) {
-                // TODO: check if the process have died at this point.
-                //   If the process has died, we should probably just finish the watch mode
-                // TODO: check if nob itself requires a rebuild and restart it.
-                int yes = nob_needs_rebuild(TORE_BIN_PATH, tore_inputs.items, tore_inputs.count);
-                if (yes < 0) return 1;
-                if (yes) {
-                    if (build_tore(&cmd)) {
-                        kill(p, SIGINT); // TODO: we need a cross-platform nob_kill of some sort
-                        cmd_append(&cmd, TORE_BIN_PATH);
-                        da_append_many(&cmd, argv, argc);
-                        p = nob_cmd_start_process(cmd, NULL, NULL, NULL);
-                        cmd.count = 0;
-                    } else {
-                        cmd_append(&cmd, "touch", TORE_BIN_PATH); // TODO: don't depend on external POSIX utils for "touching" the binary
-                        if (!nob_cmd_run(&cmd)) return 1;
-                    }
-                }
-                // TODO: Use file watch mechanisms of the available Operating System
-                //   May require implementing file watch mechanism in nob
-                usleep(100*1000); // TODO: don't depend on POSIX api for sleeping
-            }
-#endif // _WIN32
-        } else {
-            if (!nob_cmd_run(&cmd)) return 1;
-            return 0;
-        }
+        if (!nob_cmd_run(&cmd)) return 1;
+        return 0;
     }
 
     if (strcmp(command_name, "svg") == 0) {
