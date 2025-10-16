@@ -1659,12 +1659,12 @@ bool tui_disable_raw_terminal_mode(struct termios *saved)
 
 void tui_cursor_up(size_t lines)
 {
-    dprintf(STDOUT_FILENO, "\x1b[%zuA", lines);
+    printf("\x1b[%zuA", lines);
 }
 
 void tui_erase_until_bottom(void)
 {
-    dprintf(STDOUT_FILENO, "\x1b[0J");
+    printf("\x1b[0J");
 }
 
 size_t tui_grouped_notifications_selector(Grouped_Notifications *gns, size_t cursor, bool action_selector)
@@ -1676,28 +1676,28 @@ size_t tui_grouped_notifications_selector(Grouped_Notifications *gns, size_t cur
             Grouped_Notification *it = &gns->items[i];
             assert(it->group_count > 0);
             if (i == cursor) {
-                dprintf(STDOUT_FILENO, "=> ");
+                printf("=> ");
             } else {
-                dprintf(STDOUT_FILENO, "   ");
+                printf("   ");
             }
             if (it->group_count == 1) {
-                dprintf(STDOUT_FILENO, "%s (%s)", it->title, it->created_at);
+                printf("%s (%s)", it->title, it->created_at);
             } else {
-                dprintf(STDOUT_FILENO, "[%d] %s (%s)", it->group_count, it->title, it->created_at);
+                printf("[%d] %s (%s)", it->group_count, it->title, it->created_at);
             }
-            dprintf(STDOUT_FILENO, "\r\n");
+            printf("\r\n");
             lines_rendered += 1;
             if (i == cursor) {
                 if (action_selector) {
-                    dprintf(STDOUT_FILENO, "      d - delete\r\n");
+                    printf("      d - delete\r\n");
                     lines_rendered += 1;
-                    dprintf(STDOUT_FILENO, "      q - cancel\r\n");
+                    printf("      q - cancel\r\n");
                     lines_rendered += 1;
                 }
             }
         }
     } else {
-        dprintf(STDOUT_FILENO, "  (no notifications)\r\n");
+        printf("  (no notifications)\r\n");
         lines_rendered += 1;
     }
     return lines_rendered;
