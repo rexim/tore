@@ -1716,7 +1716,6 @@ int tui_read_byte(void)
 
 int tui_read_key(void)
 {
-    int result = 0;
     int c;
 
     switch ((c = tui_read_byte())) {
@@ -1724,26 +1723,22 @@ int tui_read_key(void)
         switch (tui_read_byte()) {
         case '[': {
             switch (tui_read_byte()) {
-            case 'A': return_defer('w');
-            case 'B': return_defer('s');
-            case 'C': return_defer('d');
-            case 'D': return_defer('a');
-            case -1:  return_defer(-1);
-            default:  return_defer('\x1b');
+            case 'A': return 'w';
+            case 'B': return 's';
+            case 'C': return 'd';
+            case 'D': return 'a';
+            case -1:  return -1;
+            default:  return '\x1b';
             }
         } break;
-        case -1: return_defer(-1);
-        default: return_defer('\x1b');
+        case -1: return -1;
+        default: return '\x1b';
         }
     } break;
-    default: return_defer(c);   // including -1 for the error
+    default: return c;   // including -1 for the error
     }
 
-defer:
-    if (result < 0) {
-        fprintf(stderr, "ERROR: could not read user input: %s\n", strerror(errno));
-    }
-    return result;
+    UNREACHABLE("tui_read_key");
 }
 
 bool tui_run(Command *self, const char *program_name, int argc, char **argv)
