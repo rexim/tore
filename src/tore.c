@@ -1731,7 +1731,7 @@ bool tui_run(Command *self, const char *program_name, int argc, char **argv)
 
     size_t cursor = gns.count > 0 ? gns.count - 1 : 0;
 
-    size_t lines_rendered = tui_grouped_notifications_selector(&gns, cursor, false);
+    size_t ui_height = tui_grouped_notifications_selector(&gns, cursor, false);
     enum {
         TUI_STATE_SELECT,       // Selecting notification
         TUI_STATE_ACTION,       // Picking an action on the notification
@@ -1751,19 +1751,19 @@ bool tui_run(Command *self, const char *program_name, int argc, char **argv)
             // TODO: add support for arrow keys
             case 'w': {
                 if (cursor > 0) cursor -= 1;
-                tui_cursor_up(lines_rendered);
-                lines_rendered = tui_grouped_notifications_selector(&gns, cursor, false);
+                tui_cursor_up(ui_height);
+                ui_height = tui_grouped_notifications_selector(&gns, cursor, false);
             } break;
             case 's': {
                 if (cursor+1 < gns.count) cursor += 1;
-                tui_cursor_up(lines_rendered);
-                lines_rendered = tui_grouped_notifications_selector(&gns, cursor, false);
+                tui_cursor_up(ui_height);
+                ui_height = tui_grouped_notifications_selector(&gns, cursor, false);
             } break;
             case 13:
             case ' ': {
                 if (cursor < gns.count) {
-                    tui_cursor_up(lines_rendered);
-                    lines_rendered = tui_grouped_notifications_selector(&gns, cursor, true);
+                    tui_cursor_up(ui_height);
+                    ui_height = tui_grouped_notifications_selector(&gns, cursor, true);
                     state = TUI_STATE_ACTION;
                 }
             } break;
@@ -1778,7 +1778,7 @@ bool tui_run(Command *self, const char *program_name, int argc, char **argv)
                     fprintf(stderr, "ERROR: dismiss_grouped_notification_by_group_id\n");
                     return_defer(false);
                 }
-                tui_cursor_up(lines_rendered);
+                tui_cursor_up(ui_height);
                 gns.count = 0;
                 if (!load_active_grouped_notifications(db, &gns)) {
                     fprintf(stderr, "ERROR: load_active_grouped_notifications");
@@ -1791,15 +1791,15 @@ bool tui_run(Command *self, const char *program_name, int argc, char **argv)
                         cursor = 0;
                     }
                 }
-                lines_rendered = tui_grouped_notifications_selector(&gns, cursor, false);
+                ui_height = tui_grouped_notifications_selector(&gns, cursor, false);
                 state = TUI_STATE_SELECT;
             } break;
             case 27:
             case 13:
             case ' ':
             case 'q': {
-                tui_cursor_up(lines_rendered);
-                lines_rendered = tui_grouped_notifications_selector(&gns, cursor, false);
+                tui_cursor_up(ui_height);
+                ui_height = tui_grouped_notifications_selector(&gns, cursor, false);
                 state = TUI_STATE_SELECT;
             } break;
             }
