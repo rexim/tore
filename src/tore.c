@@ -1703,6 +1703,49 @@ size_t tui_grouped_notifications_selector(Grouped_Notifications *gns, size_t cur
     return lines_rendered;
 }
 
+int tui_read_byte(void)
+{
+    char c = '\0';
+    int n = read(STDIN_FILENO, &c, 1);
+    if (n < 0 && errno != EAGAIN) {
+        printf("ERROR: could not read user's input: %s\n", strerror(errno));
+        return -1;
+    }
+    return c;
+}
+
+int tui_read_key(void)
+{
+    int result = 0;
+    int c;
+
+    switch ((c = tui_read_byte())) {
+    case '\x1b': {
+        switch (tui_read_byte()) {
+        case '[': {
+            switch (tui_read_byte()) {
+            case 'A': return_defer('w');
+            case 'B': return_defer('s');
+            case 'C': return_defer('d');
+            case 'D': return_defer('a');
+            case -1:  return_defer(-1);
+            default:  return_defer('\x1b');
+            }
+        } break;
+        case -1: return_defer(-1);
+        default: return_defer('\x1b');
+        }
+    } break;
+    default: return_defer(c);   // including -1 for the error
+    }
+
+defer:
+    if (result < 0) {
+        fprintf(stderr, "ERROR: could not read user input: %s\n", strerror(errno));
+    }
+    return result;
+}
+
 bool tui_run(Command *self, const char *program_name, int argc, char **argv)
 {
     UNUSED(self);
@@ -1739,16 +1782,14 @@ bool tui_run(Command *self, const char *program_name, int argc, char **argv)
     size_t mark = temp_save();
     while (1) {
         temp_rewind(mark);
-        char c = '\0';
-        if (read(STDIN_FILENO, &c, 1) < 0 && errno != EAGAIN) {
-            fprintf(stderr, "ERROR: could not read user input: %s\n", strerror(errno));
-            return_defer(false);
-        }
+        int c = tui_read_key();
+
+        if (c < 0) return_defer(false);
+        if (c == 0) continue;
 
         switch (state) {
         case TUI_STATE_SELECT: {
             switch (c) {
-            // TODO: add support for arrow keys
             case 'w': {
                 if (cursor > 0) cursor -= 1;
                 tui_cursor_up(ui_height);
@@ -1759,7 +1800,8 @@ bool tui_run(Command *self, const char *program_name, int argc, char **argv)
                 tui_cursor_up(ui_height);
                 ui_height = tui_grouped_notifications_selector(&gns, cursor, false);
             } break;
-            case 13:
+            case '\x1b':
+            case '\r':
             case ' ': {
                 if (cursor < gns.count) {
                     tui_cursor_up(ui_height);
@@ -1767,8 +1809,7 @@ bool tui_run(Command *self, const char *program_name, int argc, char **argv)
                     state = TUI_STATE_ACTION;
                 }
             } break;
-            case 27:
-            case 'q': goto over;
+            case 'q': return_defer(true);
             }
         } break;
         case TUI_STATE_ACTION: {
@@ -1794,8 +1835,8 @@ bool tui_run(Command *self, const char *program_name, int argc, char **argv)
                 ui_height = tui_grouped_notifications_selector(&gns, cursor, false);
                 state = TUI_STATE_SELECT;
             } break;
-            case 27:
-            case 13:
+            case '\x1b':
+            case '\r':
             case ' ':
             case 'q': {
                 tui_cursor_up(ui_height);
@@ -1806,7 +1847,7 @@ bool tui_run(Command *self, const char *program_name, int argc, char **argv)
         } break;
         default: UNREACHABLE("tui state");
         }
-    } over:
+    }
 
 defer:
     if (db) {
