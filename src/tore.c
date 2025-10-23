@@ -10,6 +10,7 @@
 
 #define NOB_IMPLEMENTATION
 #define NOB_STRIP_PREFIX
+#define NOB_NO_ECHO
 #include "nob.h"
 
 #include "bundle.h"
@@ -456,6 +457,32 @@ bool dismiss_grouped_notifications_by_indices_from_args(sqlite3 *db, int *how_ma
 
 defer:
     free(gns.items);
+    return result;
+}
+
+bool update_notification_title(sqlite3 *db, int notif_id, const char *title)
+{
+    bool result = true;
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, "UPDATE Notifications SET title = ? WHERE id = ?;", -1, &stmt, NULL) != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+    int column = 0;
+    if (sqlite3_bind_text(stmt, ++column, title, strlen(title), NULL) != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+    if (sqlite3_bind_int(stmt, ++column, notif_id) != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+defer:
+    if (stmt) sqlite3_finalize(stmt);
     return result;
 }
 
@@ -1695,6 +1722,7 @@ void tui_erase_until_bottom(void)
     printf("\x1b[0J");
 }
 
+// TODO: scroll view for notification selector when it does not fully fit into the screen
 size_t tui_grouped_notifications_selector(Grouped_Notifications *gns, size_t cursor, bool action_selector)
 {
     tui_erase_until_bottom();
@@ -1716,9 +1744,16 @@ size_t tui_grouped_notifications_selector(Grouped_Notifications *gns, size_t cur
             printf("\r\n");
             lines_rendered += 1;
             if (i == cursor) {
+                // TODO: This place must be coupled with the switch-case in tui-run which dispatches the action displayed in here.
+                // Right now to add a new action you must do 2 modifications and loosely related places. Modification in one such place
+                // MUST cause a compilation (or at least a runtime) error in the other one.
                 if (action_selector) {
                     printf("      d - delete\r\n");
                     lines_rendered += 1;
+                    if (it->group_count == 1) {
+                        printf("      e - edit title\r\n");
+                        lines_rendered += 1;
+                    }
                     printf("      q - cancel\r\n");
                     lines_rendered += 1;
                 }
@@ -1837,17 +1872,39 @@ bool tui_run(Command *self, const char *program_name, int argc, char **argv)
         } break;
         case TUI_STATE_ACTION: {
             switch (c) {
-            case 'd': {
-                if (!dismiss_grouped_notification_by_group_id(db, gns.items[cursor].group_id)) {
-                    fprintf(stderr, "ERROR: dismiss_grouped_notification_by_group_id\n");
-                    return_defer(false);
+            case 'e': {
+                // TODO: should we allow editing groups of notifications?
+                if (gns.items[cursor].group_count > 1) continue;
+                const char *title_path = temp_sprintf("%s/TITLE", TORE_DIR_PATH);
+                int title_len = strlen(gns.items[cursor].title);
+                if (!write_entire_file(title_path, gns.items[cursor].title, title_len)) return_defer(NULL);
+                static Cmd cmd = {0};
+                // TODO: grab the editor from $TORE_EDITOR
+                cmd_append(&cmd, "vi");
+                cmd_append(&cmd, title_path);
+                if (!cmd_run(&cmd)) return_defer(NULL);
+                static String_Builder sb = {0};
+                sb.count = 0;
+                if (!read_entire_file(title_path, &sb)) return_defer(NULL);
+                String_View sv = sb_to_sv(sb);
+                String_View line = sv_trim(sv_chop_by_delim(&sv, '\n'));
+                if (line.count > 0) {
+                    const char *new_title = temp_sv_to_cstr(line);
+                    if (strcmp(new_title, gns.items[cursor].title) != 0) {
+                        if (!update_notification_title(db, gns.items[cursor].notif_id, new_title)) return_defer(NULL);
+                        tui_cursor_up(ui_height);
+                        gns.count = 0;
+                        if (!load_active_grouped_notifications(db, &gns)) return_defer(false);
+                    }
                 }
+                ui_height = tui_grouped_notifications_selector(&gns, cursor, false);
+                state = TUI_STATE_SELECT;
+            } break;
+            case 'd': {
+                if (!dismiss_grouped_notification_by_group_id(db, gns.items[cursor].group_id)) return_defer(false);
                 tui_cursor_up(ui_height);
                 gns.count = 0;
-                if (!load_active_grouped_notifications(db, &gns)) {
-                    fprintf(stderr, "ERROR: load_active_grouped_notifications");
-                    return_defer(false);
-                }
+                if (!load_active_grouped_notifications(db, &gns)) return_defer(false);
                 if (cursor >= gns.count) {
                     if (gns.count > 0) {
                         cursor = gns.count - 1;
@@ -2051,6 +2108,7 @@ defer:
 }
 
 // TODO: `undo` command
+//   We can just simply make database snapshots in TORE_DIR_PATH on every db modification and
+//   make the `undo` command recover them.
 // TODO: some way to turn Notification into a Reminder
 // TODO: calendar output with the reminders
-// TODO: interactive TUI mode for tore
