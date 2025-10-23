@@ -14,7 +14,8 @@
 
 #include "bundle.h"
 
-#define TORE_FILENAME ".tore"
+#define TORE_DIRNAME ".tore"
+#define TORE_DBNAME "db"
 #define STR(x) STR2_ELECTRIC_BOOGALOO(x)
 #define STR2_ELECTRIC_BOOGALOO(x) #x
 #define DEFAULT_SERVE_PORT 6969
@@ -73,7 +74,7 @@ const char *migrations[] = {
 };
 
 // TODO: can we just extract tore_path from db somehow?
-bool create_schema(sqlite3 *db, const char *tore_path)
+bool create_schema(sqlite3 *db, const char *tore_path, bool tore_trace_migration_queries)
 {
     bool result = true;
     sqlite3_stmt *stmt = NULL;
@@ -117,7 +118,6 @@ bool create_schema(sqlite3 *db, const char *tore_path)
     sqlite3_finalize(stmt);
     stmt = NULL;
 
-    bool tore_trace_migration_queries = getenv("TORE_TRACE_MIGRATION_QUERIES") != NULL;
     for (; index < ARRAY_LEN(migrations); ++index) {
         printf("INFO: %s: applying migration %zu\n", tore_path, index);
         if (tore_trace_migration_queries) printf("%s\n", migrations[index]);
@@ -880,19 +880,53 @@ sqlite3 *open_tore_db(void)
 
     const char *home_path = getenv("HOME");
     if (home_path == NULL) {
-        fprintf(stderr, "ERROR: No $HOME environment variable is setup. We need it to find the location of ~/"TORE_FILENAME" database.\n");
+        fprintf(stderr, "ERROR: No $HOME environment variable is setup. We need it to find the location of ~/"TORE_DIRNAME"/ directory.\n");
         return_defer(NULL);
     }
 
-    const char *tore_path = temp_sprintf("%s/"TORE_FILENAME, home_path);
+    // TODO: normalize those paths
+    const char *tore_dir_path = temp_sprintf("%s/"TORE_DIRNAME, home_path);
+    const char *tore_db_path = temp_sprintf("%s/"TORE_DBNAME, tore_dir_path);
+    int exists = file_exists(tore_dir_path);
+    if (exists < 0) return_defer(NULL);
+    bool tore_trace_migration_queries = getenv("TORE_TRACE_MIGRATION_QUERIES") != NULL;
+    if (!tore_trace_migration_queries) minimal_log_level = WARNING;
+    bool tore_dir_is_symlink = false;
+    if (!exists) {
+        if (!mkdir_if_not_exists(tore_dir_path)) return_defer(NULL);
+    } else {
+        File_Type type = nob_get_file_type(tore_dir_path);
+        if (type < 0) return_defer(NULL);
+        switch (type) {
+        case FILE_DIRECTORY: break;
+        case FILE_REGULAR: {
+            nob_log(INFO, "%s is a file! Migrating it to a directory...", tore_dir_path);
+            const char *tore_tmp_db_path = temp_sprintf("%s.tmp", tore_dir_path);
+            if (!nob_rename(tore_dir_path, tore_tmp_db_path)) return_defer(NULL);
+            if (!mkdir_if_not_exists(tore_dir_path)) return_defer(NULL);
+            if (!nob_rename(tore_tmp_db_path, tore_db_path)) return_defer(NULL);
+        } break;
+        case FILE_SYMLINK: {
+            tore_dir_is_symlink = true;
+        } break;
+        case FILE_OTHER: {
+            fprintf(stderr, "ERROR: %s is a weird file! We expect it to be a directory or a regular file in case of a legacy database...\n", tore_dir_path);
+            return_defer(NULL);
+        } break;
+        }
+    }
+    if (!tore_trace_migration_queries) minimal_log_level = INFO;
 
-    int ret = sqlite3_open(tore_path, &result);
+    int ret = sqlite3_open(tore_db_path, &result);
     if (ret != SQLITE_OK) {
-        fprintf(stderr, "ERROR: %s: %s\n", tore_path, sqlite3_errstr(ret));
+        fprintf(stderr, "ERROR: %s: %s\n", tore_db_path, sqlite3_errstr(ret));
+        if (tore_dir_is_symlink) {
+            fprintf(stderr, "NOTE: Your %s is a symlink! We used to expect this path to lead to an sqlite3 database file, but at some point we changed it to a directory. And now the database file is expected to be at %s. If you are using some clever symlink setup, please update it accordingly so we could open %s as the sqlite3 database.\n", tore_dir_path, tore_db_path, tore_db_path);
+        }
         return_defer(NULL);
     }
 
-    if (!create_schema(result, tore_path)) {
+    if (!create_schema(result, tore_db_path, tore_trace_migration_queries)) {
         sqlite3_close(result);
         return_defer(NULL);
     }
