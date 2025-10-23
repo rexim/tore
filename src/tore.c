@@ -74,7 +74,7 @@ const char *migrations[] = {
 };
 
 // TODO: can we just extract tore_path from db somehow?
-bool create_schema(sqlite3 *db, const char *tore_path, bool tore_trace_migration_queries)
+bool create_schema(sqlite3 *db, const char *tore_path)
 {
     bool result = true;
     sqlite3_stmt *stmt = NULL;
@@ -118,6 +118,7 @@ bool create_schema(sqlite3 *db, const char *tore_path, bool tore_trace_migration
     sqlite3_finalize(stmt);
     stmt = NULL;
 
+    bool tore_trace_migration_queries = getenv("TORE_TRACE_MIGRATION_QUERIES") != NULL;
     for (; index < ARRAY_LEN(migrations); ++index) {
         printf("INFO: %s: applying migration %zu\n", tore_path, index);
         if (tore_trace_migration_queries) printf("%s\n", migrations[index]);
@@ -889,8 +890,6 @@ sqlite3 *open_tore_db(void)
     const char *tore_db_path = temp_sprintf("%s/"TORE_DBNAME, tore_dir_path);
     int exists = file_exists(tore_dir_path);
     if (exists < 0) return_defer(NULL);
-    bool tore_trace_migration_queries = getenv("TORE_TRACE_MIGRATION_QUERIES") != NULL;
-    if (!tore_trace_migration_queries) minimal_log_level = WARNING;
     bool tore_dir_is_symlink = false;
     if (!exists) {
         if (!mkdir_if_not_exists(tore_dir_path)) return_defer(NULL);
@@ -915,7 +914,6 @@ sqlite3 *open_tore_db(void)
         } break;
         }
     }
-    if (!tore_trace_migration_queries) minimal_log_level = INFO;
 
     int ret = sqlite3_open(tore_db_path, &result);
     if (ret != SQLITE_OK) {
@@ -926,7 +924,7 @@ sqlite3 *open_tore_db(void)
         return_defer(NULL);
     }
 
-    if (!create_schema(result, tore_db_path, tore_trace_migration_queries)) {
+    if (!create_schema(result, tore_db_path)) {
         sqlite3_close(result);
         return_defer(NULL);
     }

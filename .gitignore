@@ -1,4 +1,8 @@
+# nob garbage
 build/
 nob
 nob.old
+
+# editor garbage
 TAGS
+*.swp
