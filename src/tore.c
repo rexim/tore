@@ -15,8 +15,9 @@
 
 #include "bundle.h"
 
-#define TORE_DIRNAME ".tore"
-#define TORE_DBNAME "db"
+#define TORE_DIR_NAME ".tore"
+#define TORE_DB_NAME "db"
+#define TORE_TITLE_FILE_NAME "TITLE"
 #define STR(x) STR2_ELECTRIC_BOOGALOO(x)
 #define STR2_ELECTRIC_BOOGALOO(x) #x
 #define DEFAULT_SERVE_PORT 6969
@@ -1722,11 +1723,24 @@ void tui_erase_until_bottom(void)
     printf("\x1b[0J");
 }
 
+typedef enum {
+    TAS_NONE,
+    TAS_CONFIRM_DELETE,
+    TAS_HELP,
+} Tui_Action_Selector;
+
 // TODO: scroll view for notification selector when it does not fully fit into the screen
-size_t tui_grouped_notifications_selector(Grouped_Notifications *gns, size_t cursor, bool action_selector)
+size_t tui_grouped_notifications_selector(Grouped_Notifications *gns, size_t cursor, Tui_Action_Selector action_selector, const char *error_message)
 {
     tui_erase_until_bottom();
     size_t lines_rendered = 0;
+    bool disable_edit = gns->count == 0;
+    bool disable_delete = gns->count == 0;
+    for (size_t i = 0; i < gns->count; ++i) {
+        if (i == cursor && gns->items[i].group_count > 1) {
+            disable_edit = true;
+        }
+    }
     if (gns->count > 0) {
         for (size_t i = 0; i < gns->count; ++i) {
             Grouped_Notification *it = &gns->items[i];
@@ -1741,27 +1755,57 @@ size_t tui_grouped_notifications_selector(Grouped_Notifications *gns, size_t cur
             } else {
                 printf("[%d] %s (%s)", it->group_count, it->title, it->created_at);
             }
+            if (i == cursor) {
+                if (error_message) {
+                    printf(" \x1b[31m<- ERROR: %s\x1b[39m", error_message);
+                }
+            }
             printf("\r\n");
             lines_rendered += 1;
             if (i == cursor) {
                 // TODO: This place must be coupled with the switch-case in tui-run which dispatches the action displayed in here.
                 // Right now to add a new action you must do 2 modifications and loosely related places. Modification in one such place
                 // MUST cause a compilation (or at least a runtime) error in the other one.
-                if (action_selector) {
-                    printf("      d - delete\r\n");
-                    lines_rendered += 1;
-                    if (it->group_count == 1) {
-                        printf("      e - edit title\r\n");
+                switch (action_selector) {
+                    case TAS_NONE: break;
+                    case TAS_CONFIRM_DELETE: {
+                        printf("      d - delete\r\n");
                         lines_rendered += 1;
-                    }
-                    printf("      q - cancel\r\n");
-                    lines_rendered += 1;
+                        printf("      Esc/Space/Enter/q - cancel\r\n");
+                        lines_rendered += 1;
+                    } break;
+                    case TAS_HELP: break;
                 }
             }
         }
     } else {
-        printf("  (no notifications)\r\n");
+        printf("  (no notifications)");
+        if (error_message) {
+            printf(" \x1b[31m<- ERROR: %s\x1b[39m", error_message);
+        }
+        printf(" \r\n");
         lines_rendered += 1;
+    }
+    switch (action_selector) {
+        case TAS_NONE: {
+            printf("      ? - help\r\n");
+            lines_rendered += 1;
+        } break;
+        case TAS_HELP: {
+            printf("      w/s         - move up/down\r\n");
+            lines_rendered += 1;
+            printf("      n           - new notification\r\n");
+            lines_rendered += 1;
+            printf("      %se           - edit title\x1b[39m\r\n", disable_edit ? "\x1b[90m" : "\x1b[39m");
+            lines_rendered += 1;
+            printf("      %sEnter/Space - delete notification\x1b[39m\r\n", disable_delete ? "\x1b[90m" : "\x1b[39m");
+            lines_rendered += 1;
+            printf("      Esc/q       - quit\r\n");
+            lines_rendered += 1;
+            printf("      ? - help\r\n");
+            lines_rendered += 1;
+        } break;
+        case TAS_CONFIRM_DELETE: break;
     }
     return lines_rendered;
 }
@@ -1804,6 +1848,21 @@ int tui_read_key(void)
     UNREACHABLE("tui_read_key");
 }
 
+bool tui_edit_title_file(const char *title_path, Cmd *cmd, String_Builder *sb, String_View *new_title)
+{
+    bool result = true;
+    // TODO: grab the editor from $TORE_EDITOR
+    cmd_append(cmd, "vi");
+    cmd_append(cmd, title_path);
+    if (!cmd_run(cmd)) return_defer(false);
+    sb->count = 0;
+    if (!read_entire_file(title_path, sb)) return_defer(false);
+    String_View sv = sb_to_sv(*sb);
+    *new_title = sv_trim(sv_chop_by_delim(&sv, '\n'));
+defer:
+    return result;
+}
+
 bool tui_run(Command *self, const char *program_name, int argc, char **argv)
 {
     UNUSED(self);
@@ -1814,6 +1873,8 @@ bool tui_run(Command *self, const char *program_name, int argc, char **argv)
     bool result = true;
     sqlite3 *db = NULL;
     Grouped_Notifications gns = {0};
+    String_Builder sb = {0};
+    Cmd cmd = {0};
     struct termios saved = {0};
     bool raw_terminal_enabled = false;
 
@@ -1832,7 +1893,7 @@ bool tui_run(Command *self, const char *program_name, int argc, char **argv)
 
     size_t cursor = gns.count > 0 ? gns.count - 1 : 0;
 
-    size_t ui_height = tui_grouped_notifications_selector(&gns, cursor, false);
+    size_t ui_height = tui_grouped_notifications_selector(&gns, cursor, TAS_NONE, NULL);
     enum {
         TUI_STATE_SELECT,       // Selecting notification
         TUI_STATE_ACTION,       // Picking an action on the notification
@@ -1851,55 +1912,91 @@ bool tui_run(Command *self, const char *program_name, int argc, char **argv)
             case 'w': {
                 if (cursor > 0) cursor -= 1;
                 tui_cursor_up(ui_height);
-                ui_height = tui_grouped_notifications_selector(&gns, cursor, false);
+                ui_height = tui_grouped_notifications_selector(&gns, cursor, TAS_NONE, NULL);
             } break;
             case 's': {
                 if (cursor+1 < gns.count) cursor += 1;
                 tui_cursor_up(ui_height);
-                ui_height = tui_grouped_notifications_selector(&gns, cursor, false);
+                ui_height = tui_grouped_notifications_selector(&gns, cursor, TAS_NONE, NULL);
+            } break;
+            case '?': {
+                tui_cursor_up(ui_height);
+                ui_height = tui_grouped_notifications_selector(&gns, cursor, TAS_HELP, NULL);
+            } break;
+            case 'n': {
+                const char *title_path = temp_sprintf("%s/%s", TORE_DIR_PATH, TORE_TITLE_FILE_NAME);
+                sb.count = 0;
+                sb_appendf(&sb, "\n");
+                sb_appendf(&sb, "\n");
+                sb_appendf(&sb, "# Write the title of the New Notification in the first line.\n");
+                sb_appendf(&sb, "# Leave the first line empty to cancel.\n");
+                if (!write_entire_file(title_path, sb.items, sb.count)) return_defer(false);
+                String_View new_title = {0};
+                if (!tui_edit_title_file(title_path, &cmd, &sb, &new_title)) return_defer(false);
+                if (new_title.count > 0) {
+                    if (!create_notification_with_title(db, temp_sv_to_cstr(new_title))) {
+                        return_defer(false);
+                    }
+                }
+                tui_cursor_up(ui_height);
+                gns.count = 0;
+                if (!load_active_grouped_notifications(db, &gns)) return_defer(false);
+                assert(gns.count > 0);
+                cursor = gns.count - 1;
+                ui_height = tui_grouped_notifications_selector(&gns, cursor, TAS_NONE, NULL);
+            } break;
+            case 'e': {
+                if (cursor >= gns.count) {
+                    tui_cursor_up(ui_height);
+                    ui_height = tui_grouped_notifications_selector(&gns, cursor, TAS_NONE, "nothing to edit");
+                    continue;
+                }
+                if (gns.items[cursor].group_count > 1) {
+                    // TODO: should we allow editing groups of notifications?
+                    tui_cursor_up(ui_height);
+                    ui_height = tui_grouped_notifications_selector(&gns, cursor, TAS_NONE, "cannot edit groups yet");
+                    continue;
+                }
+                const char *title_path = temp_sprintf("%s/%s", TORE_DIR_PATH, TORE_TITLE_FILE_NAME);
+                sb.count = 0;
+                sb_appendf(&sb, "%s\n", gns.items[cursor].title);
+                sb_appendf(&sb, "\n");
+                sb_appendf(&sb, "# Modify the title of the Notification in the first line above.\n");
+                sb_appendf(&sb, "# Only the first line is important. Everything below it will be ignored.\n");
+                if (!write_entire_file(title_path, sb.items, sb.count)) return_defer(false);
+                String_View new_title = {0};
+                if (!tui_edit_title_file(title_path, &cmd, &sb, &new_title)) return_defer(false);
+                if (new_title.count > 0) {
+                    const char *new_title_cstr = temp_sv_to_cstr(new_title);
+                    if (strcmp(new_title_cstr, gns.items[cursor].title) != 0) {
+                        if (!update_notification_title(db, gns.items[cursor].notif_id, new_title_cstr)) {
+                            return_defer(false);
+                        }
+                    }
+                }
+                tui_cursor_up(ui_height);
+                gns.count = 0;
+                if (!load_active_grouped_notifications(db, &gns)) return_defer(false);
+                assert(cursor < gns.count);
+                ui_height = tui_grouped_notifications_selector(&gns, cursor, TAS_NONE, NULL);
             } break;
             case '\x1b':
             case '\r':
             case ' ': {
-                if (cursor < gns.count) {
+                if (cursor >= gns.count) {
                     tui_cursor_up(ui_height);
-                    ui_height = tui_grouped_notifications_selector(&gns, cursor, true);
-                    state = TUI_STATE_ACTION;
+                    ui_height = tui_grouped_notifications_selector(&gns, cursor, TAS_NONE, "nothing to delete");
+                    continue;
                 }
+                tui_cursor_up(ui_height);
+                ui_height = tui_grouped_notifications_selector(&gns, cursor, TAS_CONFIRM_DELETE, NULL);
+                state = TUI_STATE_ACTION;
             } break;
             case 'q': return_defer(true);
             }
         } break;
         case TUI_STATE_ACTION: {
             switch (c) {
-            case 'e': {
-                // TODO: should we allow editing groups of notifications?
-                if (gns.items[cursor].group_count > 1) continue;
-                const char *title_path = temp_sprintf("%s/TITLE", TORE_DIR_PATH);
-                int title_len = strlen(gns.items[cursor].title);
-                if (!write_entire_file(title_path, gns.items[cursor].title, title_len)) return_defer(NULL);
-                static Cmd cmd = {0};
-                // TODO: grab the editor from $TORE_EDITOR
-                cmd_append(&cmd, "vi");
-                cmd_append(&cmd, title_path);
-                if (!cmd_run(&cmd)) return_defer(NULL);
-                static String_Builder sb = {0};
-                sb.count = 0;
-                if (!read_entire_file(title_path, &sb)) return_defer(NULL);
-                String_View sv = sb_to_sv(sb);
-                String_View line = sv_trim(sv_chop_by_delim(&sv, '\n'));
-                if (line.count > 0) {
-                    const char *new_title = temp_sv_to_cstr(line);
-                    if (strcmp(new_title, gns.items[cursor].title) != 0) {
-                        if (!update_notification_title(db, gns.items[cursor].notif_id, new_title)) return_defer(NULL);
-                        tui_cursor_up(ui_height);
-                        gns.count = 0;
-                        if (!load_active_grouped_notifications(db, &gns)) return_defer(false);
-                    }
-                }
-                ui_height = tui_grouped_notifications_selector(&gns, cursor, false);
-                state = TUI_STATE_SELECT;
-            } break;
             case 'd': {
                 if (!dismiss_grouped_notification_by_group_id(db, gns.items[cursor].group_id)) return_defer(false);
                 tui_cursor_up(ui_height);
@@ -1912,7 +2009,7 @@ bool tui_run(Command *self, const char *program_name, int argc, char **argv)
                         cursor = 0;
                     }
                 }
-                ui_height = tui_grouped_notifications_selector(&gns, cursor, false);
+                ui_height = tui_grouped_notifications_selector(&gns, cursor, TAS_NONE, NULL);
                 state = TUI_STATE_SELECT;
             } break;
             case '\x1b':
@@ -1920,7 +2017,7 @@ bool tui_run(Command *self, const char *program_name, int argc, char **argv)
             case ' ':
             case 'q': {
                 tui_cursor_up(ui_height);
-                ui_height = tui_grouped_notifications_selector(&gns, cursor, false);
+                ui_height = tui_grouped_notifications_selector(&gns, cursor, TAS_NONE, NULL);
                 state = TUI_STATE_SELECT;
             } break;
             }
@@ -1935,6 +2032,8 @@ defer:
         sqlite3_close(db);
     }
     free(gns.items);
+    free(sb.items);
+    free(cmd.items);
     if (raw_terminal_enabled) {
         tui_disable_raw_terminal_mode(&saved);
     }
@@ -2082,11 +2181,11 @@ int main(int argc, char **argv)
 
     HOME_PATH = getenv("HOME");
     if (HOME_PATH == NULL) {
-        fprintf(stderr, "ERROR: No $HOME environment variable is setup. We need it to find the location of ~/%s/ directory.\n", TORE_DIRNAME);
+        fprintf(stderr, "ERROR: No $HOME environment variable is setup. We need it to find the location of ~/%s/ directory.\n", TORE_DIR_NAME);
         return 1;
     }
-    TORE_DIR_PATH = temp_sprintf("%s/%s", HOME_PATH, TORE_DIRNAME);
-    TORE_DB_PATH = temp_sprintf("%s/%s", TORE_DIR_PATH, TORE_DBNAME);
+    TORE_DIR_PATH = temp_sprintf("%s/%s", HOME_PATH, TORE_DIR_NAME);
+    TORE_DB_PATH = temp_sprintf("%s/%s", TORE_DIR_PATH, TORE_DB_NAME);
     TORE_TRACE_MIGRATION_QUERIES = getenv("TORE_TRACE_MIGRATION_QUERIES") != NULL;
 
     const char *program_name = shift(argv, argc);
